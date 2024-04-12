@@ -1,0 +1,104 @@
+syntax = "proto3";
+package relay;
+
+service RelayService {
+  // Stream real-time interactive to the session.
+  rpc Channel(stream RelayUpdate) returns (stream RelayUpdate);
+
+  // Gracefully shut down an existing relay session.
+  rpc Close(CloseRequest) returns (CloseResponse);
+}
+
+// Request to stop a relay session gracefully.
+message CloseRequest {
+  bytes encrypted_share_code = 1;  // Encrypted share code.
+}
+
+// Server response to closing a session.
+message CloseResponse {}
+
+// Bidirectional streaming update from the relay server.
+message RelayUpdate{
+  oneof relay_message {
+    Join join = 1;           // First stream message: join session.
+    Ready ready = 2;
+    SenderUpdate sender = 3;
+    ReceiverUpdate receiver = 4;
+    Done done = 6;
+    Close other_close = 7;
+    fixed64 ping = 8;
+    string error = 1024;
+  }
+}
+
+// Request to join an relay session.
+message Join {
+  bytes encrypted_share_code = 1;  // Encrypted share code.
+  Character character = 2;         // Character.
+}
+
+message Ready {}
+
+enum Character {
+  Sender = 0;     // Character of sharer.
+  Receiver = 1;  // Character of recipient.
+}
+
+message Done {}
+
+message Close {}
+
+message SenderUpdate {
+  oneof sender_message {
+    SendRequest send_request = 1;
+    NewFileRequest new_file_request = 3;
+    FileData file_data = 4;
+    FileDone file_done = 5;
+  }
+}
+
+message SendRequest {
+  uint64 total_size = 1;
+  uint64 num_files = 2;
+  uint64 num_folders = 3;
+  uint64 max_file_name_length = 4;
+}
+
+message NewFileRequest {
+  uint64 file_id = 1;
+  string filename = 2;
+  string relative_path = 3;
+  uint64 total_size = 4;
+  bool is_empty_dir = 5;
+}
+
+message FileData {
+  uint64 file_id = 1;
+  bytes data = 2;
+}
+
+message FileDone {
+  uint64 file_id = 1;
+}
+
+message ReceiverUpdate {
+  oneof receiver_message {
+    Confirm share_confirm = 1;
+    FileConfirm new_file_confirm = 2;
+  }
+}
+
+message FileConfirm {
+  uint64 file_id = 1;
+  Confirm confirm = 2;
+}
+
+enum Confirm {
+  Accept = 0;
+  Reject = 1;
+}
+
+message FileResult {
+  int32 file_id = 1;
+  int32 status = 2; // The status of file transfer, 0 is success other is failed.
+}

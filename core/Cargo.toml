@@ -1,0 +1,23 @@
+[package]
+name = "flash_cat_core"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+flash_cat_common.workspace = true
+flash_cat_relay.workspace = true
+
+anyhow.workspace = true
+async-channel.workspace = true
+async-stream.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+prost.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
+rand.workspace = true
+log.workspace = true

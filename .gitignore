@@ -1,0 +1,10 @@
+/target
+
+### IntelliJ IDEA ###
+.idea
+
+### Visual Studio Code ###
+.vscode
+
+# MacOs
+.DS_Store

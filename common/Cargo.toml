@@ -1,0 +1,30 @@
+[package]
+name = "flash_cat_common"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+fern.workspace = true
+prost.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+log.workspace = true
+rand.workspace = true
+indicatif.workspace = true
+walkdir = "2.5.0"
+zip = "0.6.6"
+sha2 = "0.10.8"
+hex = "0.4.3"
+aes-gcm = "0.10.3"
+
+[build-dependencies]
+tonic-build = "0.11.0"
+
+[features]
+progress = []
