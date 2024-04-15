@@ -4,7 +4,10 @@ use flash_cat_common::{init_logger, VersionInfo, RELAY_VERSION};
 use flash_cat_relay::relay::Relay;
 use log::{error, info};
 use std::net::{IpAddr, SocketAddr};
+#[cfg(unix)]
 use tokio::signal::unix::{signal, SignalKind};
+#[cfg(windows)]
+use tokio::signal::ctrl_c;
 
 #[derive(Parser, Debug)]
 #[clap(name = "flash-cat-relay")]
@@ -41,8 +44,12 @@ const VERSION_INFO: &'static VersionInfo = &VersionInfo {
 
 #[tokio::main]
 async fn start(addr: SocketAddr) -> Result<()> {
+    #[cfg(unix)]
     let mut sigterm = signal(SignalKind::terminate())?;
+    #[cfg(unix)]
     let mut sigint = signal(SignalKind::interrupt())?;
+    #[cfg(windows)]
+    let sigint = ctrl_c();
 
     let relay = Relay::new()?;
 
@@ -51,10 +58,22 @@ async fn start(addr: SocketAddr) -> Result<()> {
         relay.bind(addr).await
     };
 
+    #[cfg(unix)]
     let signals_task = async {
         tokio::select! {
             Some(()) = sigterm.recv() => (),
             Some(()) = sigint.recv() => (),
+            else => return Ok(()),
+        }
+        info!("gracefully shutting down...");
+        relay.shutdown();
+        Ok(())
+    };
+
+    #[cfg(windows)]
+    let signals_task = async {
+        tokio::select! {
+            Ok(()) = sigint => (),
             else => return Ok(()),
         }
         info!("gracefully shutting down...");

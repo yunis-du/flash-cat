@@ -2,9 +2,10 @@ use std::{
     cmp::max,
     fs::{self, File},
     io,
-    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 
 use anyhow::Result;
 use indicatif::HumanBytes;
@@ -21,6 +22,7 @@ pub struct FileInfo {
     pub name: String,
     pub access_path: String,
     pub relative_path: String,
+    #[cfg(unix)]
     pub mode: u32,
     pub size: u64,
     pub empty_dir: bool,
@@ -103,6 +105,7 @@ pub fn collect_files<P: AsRef<Path>>(paths: &[P]) -> FileCollector {
                                 name: file_name,
                                 access_path: path.to_string_lossy().to_string(),
                                 relative_path: relative_path.to_string_lossy().to_string(),
+                                #[cfg(unix)]
                                 mode: metadata.mode(),
                                 size: file_size,
                                 empty_dir: false,
@@ -122,6 +125,7 @@ pub fn collect_files<P: AsRef<Path>>(paths: &[P]) -> FileCollector {
                                         name: file_name,
                                         access_path: path.to_string_lossy().to_string(),
                                         relative_path: relative_path.to_string_lossy().to_string(),
+                                        #[cfg(unix)]
                                         mode: metadata.mode(),
                                         size: 0,
                                         empty_dir: true,

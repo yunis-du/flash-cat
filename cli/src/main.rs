@@ -4,7 +4,10 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use flash_cat_cli::{receive::Receive, send::Send};
 use flash_cat_common::{VersionInfo, CLI_VERSION};
+#[cfg(unix)]
 use tokio::signal::unix::{signal, SignalKind};
+#[cfg(windows)]
+use tokio::signal::ctrl_c;
 
 #[derive(Parser, Debug)]
 #[clap(name = "flash-cat-cli")]
@@ -58,17 +61,33 @@ const VERSION_INFO: &'static VersionInfo = &VersionInfo {
 
 #[tokio::main]
 async fn send(send_cmd: SendCmd) -> Result<()> {
+    #[cfg(unix)]
     let mut sigterm = signal(SignalKind::terminate())?;
+    #[cfg(unix)]
     let mut sigint = signal(SignalKind::interrupt())?;
+    #[cfg(windows)]
+    let sigint = ctrl_c();
 
     let send = Send::new(send_cmd.zip, send_cmd.relay, send_cmd.files).await?;
 
     let send_task = async { send.run().await };
 
+    #[cfg(unix)]
     let signals_task = async {
         tokio::select! {
             Some(()) = sigterm.recv() => (),
             Some(()) = sigint.recv() => (),
+            _ = send.terminated() => return Ok(()),
+            else => return Ok(()),
+        }
+        send.shutdown();
+        Ok(())
+    };
+
+    #[cfg(windows)]
+    let signals_task = async {
+        tokio::select! {
+            Ok(()) = sigint => (),
             _ = send.terminated() => return Ok(()),
             else => return Ok(()),
         }
@@ -82,17 +101,33 @@ async fn send(send_cmd: SendCmd) -> Result<()> {
 
 #[tokio::main]
 async fn recv(recv_cmd: RecvCmd) -> Result<()> {
+    #[cfg(unix)]
     let mut sigterm = signal(SignalKind::terminate())?;
+    #[cfg(unix)]
     let mut sigint = signal(SignalKind::interrupt())?;
+    #[cfg(windows)]
+    let sigint = ctrl_c();
 
     let receive = Receive::new(recv_cmd.share_code, recv_cmd.relay)?;
 
     let receive_task = async { receive.run().await };
 
+    #[cfg(unix)]
     let signals_task = async {
         tokio::select! {
             Some(()) = sigterm.recv() => (),
             Some(()) = sigint.recv() => (),
+            _ = receive.terminated() => return Ok(()),
+            else => return Ok(()),
+        }
+        receive.shutdown();
+        Ok(())
+    };
+
+    #[cfg(windows)]
+    let signals_task = async {
+        tokio::select! {
+            Ok(()) = sigint => (),
             _ = receive.terminated() => return Ok(()),
             else => return Ok(()),
         }
