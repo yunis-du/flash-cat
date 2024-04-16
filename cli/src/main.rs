@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, process::ExitCode};
+use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -34,9 +34,9 @@ struct SendCmd {
     #[clap(long)]
     zip: bool,
 
-    /// Relay address (default: public relay)
-    #[clap(long, value_parser)]
-    relay: Option<SocketAddr>,
+    /// Relay address (default: public relay [https://flashcat.duyunzhi.cn])
+    #[clap(long)]
+    relay: Option<String>,
 
     /// File(s) or folder(s) to send
     #[clap(required = true, num_args = 1..)]
@@ -49,9 +49,9 @@ struct RecvCmd {
     #[clap(required = true, num_args = 1)]
     share_code: String,
 
-    /// Relay address (default: public relay)
-    #[clap(long, value_parser)]
-    relay: Option<SocketAddr>,
+    /// Relay address (default: public relay [https://flashcat.duyunzhi.cn])
+    #[clap(long)]
+    relay: Option<String>,
 }
 
 const VERSION_INFO: &'static VersionInfo = &VersionInfo {

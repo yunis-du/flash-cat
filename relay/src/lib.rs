@@ -1,5 +1,5 @@
 use anyhow::Result;
-use log::debug;
+use log::info;
 use std::{future::Future, net::SocketAddr};
 
 pub mod grpc;
@@ -11,7 +11,7 @@ pub async fn run_relay(addr: SocketAddr, signal: impl Future<Output = ()>) -> Re
     let relay = relay::Relay::new()?;
 
     let relay_task = async {
-        debug!("relay listening at {addr}");
+        info!("relay listening at {addr}");
         relay.bind(addr).await
     };
 
@@ -20,7 +20,7 @@ pub async fn run_relay(addr: SocketAddr, signal: impl Future<Output = ()>) -> Re
             () = signal => (),
             else => return Ok(()),
         }
-        debug!("gracefully shutting down...");
+        info!("gracefully shutting down...");
         // Waiting done message send to the right end.
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         relay.shutdown();

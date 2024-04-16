@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use flash_cat_common::{
-    consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY_IP, PUBLIC_RELAY_PORT},
+    consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY},
     crypt::encryptor::Encryptor,
     proto::{
         receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
@@ -30,7 +30,7 @@ pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
 pub struct FlashCatSender {
     zip_files: Vec<String>,
     encryptor: Arc<Encryptor>,
-    specify_relay: Option<SocketAddr>,
+    specify_relay: Option<String>,
     file_collector: Arc<FileCollector>,
     local_relay_shutdown: Shutdown,
     public_relay_shutdown: Shutdown,
@@ -40,7 +40,7 @@ pub struct FlashCatSender {
 impl FlashCatSender {
     pub async fn new(
         share_code: String,
-        specify_relay: Option<SocketAddr>,
+        specify_relay: Option<String>,
         mut files: Vec<String>,
         zip_floder: bool,
     ) -> Result<Self> {
@@ -71,8 +71,15 @@ impl FlashCatSender {
         let (sender_stream_tx, mut sender_stream_rx) = mpsc::channel(1024);
 
         if self.specify_relay.is_some() {
-            let specify_relay_addr = self.specify_relay.unwrap();
-            let endpoint = Endpoint::from_shared(format!("http://{specify_relay_addr}"))?;
+            let specify_relay = self.specify_relay.clone().unwrap();
+            let specify_relay_addr = match specify_relay.parse() {
+                Ok(specify_relay_addr) => {
+                    let specify_relay_addr: SocketAddr = specify_relay_addr;
+                    format!("http://{specify_relay_addr}")
+                }
+                Err(_) => specify_relay,
+            };
+            let endpoint = Endpoint::from_shared(specify_relay_addr)?;
             self.connect_relay(
                 RelayType::Specify,
                 endpoint,
@@ -104,8 +111,7 @@ impl FlashCatSender {
             .await;
 
             // connect public relay
-            let endpoint =
-                Endpoint::from_shared(format!("http://{PUBLIC_RELAY_IP}:{PUBLIC_RELAY_PORT}"))?;
+            let endpoint = Endpoint::from_shared(format!("https://{PUBLIC_RELAY}"))?;
             self.connect_relay(
                 RelayType::Public,
                 endpoint,

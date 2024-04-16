@@ -3,7 +3,7 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use anyhow::Result;
 use dashmap::DashMap;
 use flash_cat_common::Shutdown;
-use log::error;
+use log::{debug, error};
 use tokio::time;
 
 use crate::{listen, session::Session};
@@ -30,6 +30,7 @@ impl RelayState {
 
     pub async fn close_old_sessions(&self) {
         loop {
+            debug!("start check old sessions");
             time::sleep(DISCONNECTED_SESSION_EXPIRY / 5).await;
             let mut to_close = Vec::new();
             for entry in &self.store {
@@ -42,6 +43,7 @@ impl RelayState {
                 if let Err(err) = self.close_session(&name).await {
                     error!("failed to close old session {name}, {err}");
                 }
+                debug!("closeed old session {name}");
             }
         }
     }

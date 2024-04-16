@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr, path::PathBuf, pin::pin, process};
+use std::{env, path::PathBuf, pin::pin, process};
 
 use anyhow::Result;
 use flash_cat_common::{utils::gen_share_code, Shutdown};
@@ -16,7 +16,7 @@ pub struct Send {
 }
 
 impl Send {
-    pub async fn new(zip: bool, relay: Option<SocketAddr>, files: Vec<String>) -> Result<Self> {
+    pub async fn new(zip: bool, relay: Option<String>, files: Vec<String>) -> Result<Self> {
         let files = files
             .into_iter()
             .map(|f| {

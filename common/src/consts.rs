@@ -4,6 +4,9 @@ pub const DEFAULT_RELAY_PORT: u16 = 20018;
 /// Ip for pubilc relay.
 pub const PUBLIC_RELAY_IP: &'static str = "36.134.33.67";
 
+/// Domain for pubilc relay.
+pub const PUBLIC_RELAY: &'static str = "flashcat.duyunzhi.cn";
+
 /// Port for pubilc relay.
 pub const PUBLIC_RELAY_PORT: u16 = 6880;
 

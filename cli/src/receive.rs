@@ -1,4 +1,4 @@
-use std::{io::{stdin, stdout, Write}, net::SocketAddr, pin::pin, time::Duration};
+use std::{io::{stdin, stdout, Write}, pin::pin, time::Duration};
 
 use anyhow::Result;
 use flash_cat_common::Shutdown;
@@ -16,7 +16,7 @@ pub struct Receive {
 }
 
 impl Receive {
-    pub fn new(share_code: String, specify_relay: Option<SocketAddr>) -> Result<Self> {
+    pub fn new(share_code: String, specify_relay: Option<String>) -> Result<Self> {
         let receiver = FlashCatReceiver::new(share_code, specify_relay)?;
         Ok(Self {
             receiver,

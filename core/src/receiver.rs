@@ -5,7 +5,7 @@ use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tonic::transport::Endpoint;
 
 use flash_cat_common::{
-    consts::{PUBLIC_RELAY_IP, PUBLIC_RELAY_PORT},
+    consts::PUBLIC_RELAY,
     crypt::encryptor::Encryptor,
     proto::{
         receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
@@ -24,14 +24,14 @@ use crate::{
 #[derive(Clone)]
 pub struct FlashCatReceiver {
     encryptor: Arc<Encryptor>,
-    specify_relay: Option<SocketAddr>,
+    specify_relay: Option<String>,
     confirm_tx: async_channel::Sender<ReceiverConfirm>,
     confirm_rx: async_channel::Receiver<ReceiverConfirm>,
     shutdown: Shutdown,
 }
 
 impl FlashCatReceiver {
-    pub fn new(share_code: String, specify_relay: Option<SocketAddr>) -> Result<Self> {
+    pub fn new(share_code: String, specify_relay: Option<String>) -> Result<Self> {
         let encryptor = Arc::new(Encryptor::new(share_code)?);
         let (confirm_tx, confirm_rx) = async_channel::bounded(10);
         Ok(Self {
@@ -49,8 +49,15 @@ impl FlashCatReceiver {
         let (receiver_stream_tx, mut receiver_stream_rx) = mpsc::channel(1024);
 
         if self.specify_relay.is_some() {
-            let specify_relay_addr = self.specify_relay.unwrap();
-            let endpoint = Endpoint::from_shared(format!("http://{specify_relay_addr}"))?;
+            let specify_relay = self.specify_relay.clone().unwrap();
+            let specify_relay_addr = match specify_relay.parse() {
+                Ok(specify_relay_addr) => {
+                    let specify_relay_addr: SocketAddr = specify_relay_addr;
+                    format!("http://{specify_relay_addr}")
+                }
+                Err(_) => specify_relay,
+            };
+            let endpoint = Endpoint::from_shared(specify_relay_addr)?;
             self.connect_relay(endpoint, receiver_stream_tx.clone(), self.shutdown.clone())
                 .await;
         } else {
@@ -64,7 +71,7 @@ impl FlashCatReceiver {
             } else {
                 // public relay
                 let endpoint =
-                    Endpoint::from_shared(format!("http://{PUBLIC_RELAY_IP}:{PUBLIC_RELAY_PORT}"))?;
+                    Endpoint::from_shared(format!("https://{PUBLIC_RELAY}"))?;
                 self.connect_relay(endpoint, receiver_stream_tx.clone(), self.shutdown.clone())
                     .await;
             }
