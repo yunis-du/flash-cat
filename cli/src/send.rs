@@ -70,7 +70,7 @@ impl Send {
                     }
                     SenderInteractionMessage::ReceiverReject => {
                         println!("Receiver reject this share. exit...");
-                        process::exit(0);
+                        self.shutdown();
                     }
                     SenderInteractionMessage::RelayFailed((relay_type, error)) => {
                         println!(
@@ -93,12 +93,11 @@ impl Send {
                     }
                     SenderInteractionMessage::OtherClose => {
                         println!("The receive end is interrupted. exit...");
-                        process::exit(0);
+                        self.shutdown();
                     }
                     SenderInteractionMessage::SendDone => {
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                         self.shutdown();
-                        // process::exit(0);
                     }
                 }
             }

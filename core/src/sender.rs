@@ -5,8 +5,8 @@ use flash_cat_common::{
     crypt::encryptor::Encryptor,
     proto::{
         receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
-        relay_update::RelayMessage, sender_update::SenderMessage, Character, CloseRequest, Confirm,
-        Done, FileConfirm, FileData, FileDone, Join, NewFileRequest, RelayUpdate, SendRequest,
+        relay_update::RelayMessage, sender_update::SenderMessage, Character, Confirm, Done,
+        FileConfirm, FileData, FileDone, Join, NewFileRequest, RelayUpdate, SendRequest,
         SenderUpdate,
     },
     utils::{
@@ -234,10 +234,6 @@ impl FlashCatSender {
         loop {
             let message = tokio::select! {
                 _ = shutdown.wait() => {
-                    client.close(CloseRequest {
-                        encrypted_share_code: encryptor.encrypt_share_code_bytes(),
-                    })
-                    .await?;
                     return Ok(());
                 }
                 // Send periodic pings to the relay.
@@ -456,7 +452,6 @@ impl FlashCatSender {
                 .await?;
             }
         }
-        Self::send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
         Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::SendDone).await?;
         Ok(())
     }
