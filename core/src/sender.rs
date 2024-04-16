@@ -11,6 +11,7 @@ use flash_cat_common::{
     },
     utils::{
         fs::{collect_files, is_idr, paths_exist, remove_files, zip_folder, FileCollector},
+        get_time_ms,
         net::{find_available_port, net_scout::NetScout},
     },
     Shutdown,
@@ -21,7 +22,7 @@ use tokio::{fs::File, io::AsyncReadExt, sync::mpsc, time::MissedTickBehavior};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tonic::transport::Endpoint;
 
-use crate::{get_time_ms, Progress, RelayType, SenderInteractionMessage, PING_INTERVAL};
+use crate::{Progress, RelayType, SenderInteractionMessage, PING_INTERVAL};
 
 /// Broadcast local relay addr timeout.
 pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -360,6 +361,7 @@ impl FlashCatSender {
                     .await?;
                 }
                 RelayMessage::Ping(_) => (),
+                RelayMessage::Pong(_) => (),
             }
         }
     }
@@ -452,6 +454,7 @@ impl FlashCatSender {
                 .await?;
             }
         }
+        Self::send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
         Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::SendDone).await?;
         Ok(())
     }

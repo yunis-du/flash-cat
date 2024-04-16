@@ -5,9 +5,12 @@ use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
 
-use flash_cat_common::proto::{
-    relay_service_server::RelayService, relay_update::RelayMessage, Character, Close, CloseRequest,
-    CloseResponse, Ready, RelayUpdate,
+use flash_cat_common::{
+    proto::{
+        relay_service_server::RelayService, relay_update::RelayMessage, Character, Close,
+        CloseRequest, CloseResponse, Ready, RelayUpdate,
+    },
+    utils::get_time_ms,
 };
 
 use crate::{
@@ -158,6 +161,10 @@ async fn handle_update(
         Some(relay_message) => {
             if let RelayMessage::Join(_) = relay_message {
                 return send_err(tx, "unexpected join".into()).await;
+            }
+            if let RelayMessage::Ping(ts) = relay_message {
+                let now = get_time_ms();
+                return send_msg(tx, RelayMessage::Pong(now - ts)).await;
             }
             if let Err(_) = update_tx.send(relay_message).await {
                 return false;

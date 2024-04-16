@@ -27,6 +27,7 @@ message RelayUpdate{
     Done done = 6;
     Close other_close = 7;
     fixed64 ping = 8;
+    fixed64 pong = 9;
     string error = 1024;
   }
 }

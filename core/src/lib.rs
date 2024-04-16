@@ -1,4 +1,4 @@
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 pub mod receiver;
 pub mod sender;
@@ -82,11 +82,4 @@ pub struct RecvNewFile {
     pub filename: String,
     pub path: String,
     pub size: u64,
-}
-
-fn get_time_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("system time is before the UNIX epoch")
-        .as_millis() as u64
 }

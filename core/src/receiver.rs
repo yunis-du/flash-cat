@@ -12,13 +12,13 @@ use flash_cat_common::{
         relay_update::RelayMessage, sender_update::SenderMessage, Character, CloseRequest, Confirm,
         FileConfirm, Join, ReceiverUpdate, RelayUpdate,
     },
-    utils::net::net_scout::NetScout,
+    utils::{get_time_ms, net::net_scout::NetScout},
     Shutdown,
 };
 
 use crate::{
-    get_time_ms, FileDuplication, Progress, ReceiverConfirm, ReceiverInteractionMessage,
-    RecvNewFile, SendFilesRequest, PING_INTERVAL,
+    FileDuplication, Progress, ReceiverConfirm, ReceiverInteractionMessage, RecvNewFile,
+    SendFilesRequest, PING_INTERVAL,
 };
 
 #[derive(Clone)]
@@ -70,8 +70,7 @@ impl FlashCatReceiver {
                     .await;
             } else {
                 // public relay
-                let endpoint =
-                    Endpoint::from_shared(format!("https://{PUBLIC_RELAY}"))?;
+                let endpoint = Endpoint::from_shared(format!("https://{PUBLIC_RELAY}"))?;
                 self.connect_relay(endpoint, receiver_stream_tx.clone(), self.shutdown.clone())
                     .await;
             }
@@ -378,6 +377,7 @@ impl FlashCatReceiver {
                     .await?;
                 }
                 RelayMessage::Ping(_) => (),
+                RelayMessage::Pong(_) => (),
             }
         }
     }
