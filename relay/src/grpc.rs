@@ -7,8 +7,7 @@ use tonic::{Request, Response, Status, Streaming};
 
 use flash_cat_common::{
     proto::{
-        relay_service_server::RelayService, relay_update::RelayMessage, Character, Close,
-        CloseRequest, CloseResponse, Ready, RelayUpdate,
+        relay_service_server::RelayService, relay_update::RelayMessage, Character, Close, CloseRequest, CloseResponse, Joined, Ready, RelayUpdate
     },
     utils::get_time_ms,
 };
@@ -39,6 +38,9 @@ impl RelayService for GrpcServer {
             Some(result) => result?,
             None => return Err(Status::invalid_argument("missing first message")),
         };
+        
+        let (tx, rx) = mpsc::channel(16);
+
         let (session, character) = match first_update.relay_message {
             Some(RelayMessage::Join(join)) => {
                 let session_name =
@@ -57,6 +59,7 @@ impl RelayService for GrpcServer {
                             };
                             let session = Arc::new(Session::new(metadata));
                             self.0.insert(&session_name, session.clone());
+                            send_msg(&tx, RelayMessage::Joined(Joined{})).await;
                             session
                         }
                     },
@@ -77,7 +80,6 @@ impl RelayService for GrpcServer {
             }
         }
 
-        let (tx, rx) = mpsc::channel(16);
         tokio::spawn(async move {
             if let Err(err) = handle_streaming(&tx, &session, stream, character).await {
                 warn!("connection exiting early due to an error {err}");

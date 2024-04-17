@@ -231,6 +231,7 @@ impl FlashCatReceiver {
                         ))
                         .await?
                 }
+                RelayMessage::Joined(_) => (),
                 RelayMessage::Ready(_) => (),
                 RelayMessage::Sender(sender) => {
                     if let Some(sender_message) = sender.sender_message {

@@ -6,6 +6,10 @@ edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name="flash-cat"
+path="src/main.rs"
+
 [dependencies]
 flash_cat_common = { workspace = true, features = ["progress"] }
 flash_cat_core.workspace = true

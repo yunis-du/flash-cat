@@ -257,6 +257,7 @@ impl FlashCatSender {
                     )
                     .await?;
                 }
+                RelayMessage::Joined(_) =>(),
                 RelayMessage::Ready(_) => {
                     Self::send_msg_to_relay(
                         &tx,

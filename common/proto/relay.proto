@@ -21,9 +21,10 @@ message CloseResponse {}
 message RelayUpdate{
   oneof relay_message {
     Join join = 1;           // First stream message: join session.
-    Ready ready = 2;
-    SenderUpdate sender = 3;
-    ReceiverUpdate receiver = 4;
+    Joined joined = 2;
+    Ready ready = 3;
+    SenderUpdate sender = 4;
+    ReceiverUpdate receiver = 5;
     Done done = 6;
     Close other_close = 7;
     fixed64 ping = 8;
@@ -37,6 +38,8 @@ message Join {
   bytes encrypted_share_code = 1;  // Encrypted share code.
   Character character = 2;         // Character.
 }
+
+message Joined {}
 
 message Ready {}
 
