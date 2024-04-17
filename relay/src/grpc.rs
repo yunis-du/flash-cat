@@ -7,7 +7,8 @@ use tonic::{Request, Response, Status, Streaming};
 
 use flash_cat_common::{
     proto::{
-        relay_service_server::RelayService, relay_update::RelayMessage, Character, Close, CloseRequest, CloseResponse, Joined, Ready, RelayUpdate
+        relay_service_server::RelayService, relay_update::RelayMessage, Character, CloseRequest,
+        CloseResponse, Joined, Ready, RelayUpdate, Terminated,
     },
     utils::get_time_ms,
 };
@@ -38,7 +39,7 @@ impl RelayService for GrpcServer {
             Some(result) => result?,
             None => return Err(Status::invalid_argument("missing first message")),
         };
-        
+
         let (tx, rx) = mpsc::channel(16);
 
         let (session, character) = match first_update.relay_message {
@@ -59,7 +60,7 @@ impl RelayService for GrpcServer {
                             };
                             let session = Arc::new(Session::new(metadata));
                             self.0.insert(&session_name, session.clone());
-                            send_msg(&tx, RelayMessage::Joined(Joined{})).await;
+                            send_msg(&tx, RelayMessage::Joined(Joined {})).await;
                             session
                         }
                     },
@@ -95,7 +96,10 @@ impl RelayService for GrpcServer {
             String::from_utf8_lossy(request.encrypted_share_code.as_ref()).to_string();
         info!("closing session {}", session_name);
         if let Some(session) = self.0.lookup(&session_name) {
-            if let Err(e) = session.broadcast(RelayMessage::OtherClose(Close {})).await {
+            if let Err(e) = session
+                .broadcast(RelayMessage::Terminated(Terminated {}))
+                .await
+            {
                 error!("broadcast failed: {e}");
             }
         }

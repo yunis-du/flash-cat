@@ -96,8 +96,7 @@ impl Send {
                         self.shutdown();
                     }
                     SenderInteractionMessage::SendDone => {
-                        println!("Send files done.");
-                        println!("Waiting for the receiver to receive finish...");
+                        println!("Send files done. Waiting for the receiver to receive finish...");
                     }
                     SenderInteractionMessage::Completed => {
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;

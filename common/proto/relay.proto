@@ -26,7 +26,7 @@ message RelayUpdate{
     SenderUpdate sender = 4;
     ReceiverUpdate receiver = 5;
     Done done = 6;
-    Close other_close = 7;
+    Terminated terminated = 7;
     fixed64 ping = 8;
     fixed64 pong = 9;
     string error = 1024;
@@ -50,7 +50,7 @@ enum Character {
 
 message Done {}
 
-message Close {}
+message Terminated {}
 
 message SenderUpdate {
   oneof sender_message {

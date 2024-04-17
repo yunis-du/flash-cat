@@ -364,14 +364,13 @@ impl FlashCatReceiver {
                         ReceiverInteractionMessage::ReceiveDone,
                     )
                     .await?;
-                    return Ok(());
                 }
                 RelayMessage::Error(e) => {
                     receiver_stream_tx
                         .send(ReceiverInteractionMessage::Error(e.to_string()))
                         .await?;
                 }
-                RelayMessage::OtherClose(_) => {
+                RelayMessage::Terminated(_) => {
                     Self::send_msg_to_stream(
                         receiver_stream_tx,
                         ReceiverInteractionMessage::OtherClose,
