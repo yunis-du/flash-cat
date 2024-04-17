@@ -1,4 +1,10 @@
-use std::{env, path::PathBuf, pin::pin, process};
+use std::{
+    env,
+    io::{stdout, Write},
+    path::PathBuf,
+    pin::pin,
+    process,
+};
 
 use anyhow::Result;
 use flash_cat_common::{utils::gen_share_code, Shutdown};
@@ -96,11 +102,16 @@ impl Send {
                         self.shutdown();
                     }
                     SenderInteractionMessage::SendDone => {
-                        println!("Send files done. Waiting for the receiver to receive finish...");
+                        print!("Send files done. Waiting for the receiver to receive finish...");
+                        stdout().flush()?;
                     }
                     SenderInteractionMessage::Completed => {
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                         self.shutdown();
+                        print!("\r                                                                                                             ");
+                        stdout().flush()?;
+                        print!("\r");
+                        stdout().flush()?;
                     }
                 }
             }
