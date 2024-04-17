@@ -236,7 +236,7 @@ impl FlashCatSender {
             let message = tokio::select! {
                 _ = shutdown.wait() => {
                     Self::send_msg_to_relay(&tx, RelayMessage::Terminated(Terminated {})).await?;
-                    return Ok(());
+                    continue;
                 }
                 // Send periodic pings to the relay.
                 _ = ping_interval.tick() => {
