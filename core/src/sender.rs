@@ -344,7 +344,7 @@ impl FlashCatSender {
                     }
                 }
                 RelayMessage::Done(_) => {
-                    Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::SendDone)
+                    Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::Completed)
                         .await?;
                 }
                 RelayMessage::Error(e) => {

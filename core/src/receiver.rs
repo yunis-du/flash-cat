@@ -10,7 +10,7 @@ use flash_cat_common::{
     proto::{
         receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
         relay_update::RelayMessage, sender_update::SenderMessage, Character, CloseRequest, Confirm,
-        FileConfirm, Join, ReceiverUpdate, RelayUpdate,
+        Done, FileConfirm, Join, ReceiverUpdate, RelayUpdate,
     },
     utils::{get_time_ms, net::net_scout::NetScout},
     Shutdown,
@@ -358,6 +358,7 @@ impl FlashCatReceiver {
                     .await?;
                 }
                 RelayMessage::Done(_) => {
+                    Self::send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
                     Self::send_msg_to_stream(
                         receiver_stream_tx,
                         ReceiverInteractionMessage::ReceiveDone,

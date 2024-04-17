@@ -17,6 +17,7 @@ pub enum SenderInteractionMessage {
     FileProgressFinish(u64),
     OtherClose,
     SendDone,
+    Completed,
 }
 
 #[derive(Debug, Clone)]
