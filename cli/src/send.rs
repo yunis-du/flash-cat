@@ -108,14 +108,14 @@ impl Send {
                     SenderInteractionMessage::Completed => {
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                         self.shutdown();
-                        print!("\r                                                                                                             ");
-                        stdout().flush()?;
-                        print!("\r");
-                        stdout().flush()?;
                     }
                 }
             }
         }
+        print!("\r{}", format!("{:<width$}", "", width = 100));
+        stdout().flush()?;
+        print!("\r");
+        stdout().flush()?;
         Ok(())
     }
 
