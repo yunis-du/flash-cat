@@ -28,7 +28,7 @@ impl Progress {
         let progress_bar = ProgressBar::new(total_size)
             .with_prefix(file_name)
             .with_message(serial_number);
-        progress_bar.set_style(ProgressStyle::with_template("{spinner:.green} {prefix:.bold.green} [{bar:50.cyan/blue}] {bytes}/{total_bytes} ({eta}) {msg}")
+        progress_bar.set_style(ProgressStyle::with_template("{spinner:.green} {prefix:.bold.green} [{bar:50.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta}) {msg}")
         .unwrap()
         .with_key("eta", |state: &ProgressState, w: &mut dyn Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap())
         .progress_chars("#>-"));
