@@ -1,11 +1,11 @@
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::{
     cmp::max,
     fs::{self, File},
     io,
     path::{Path, PathBuf},
 };
-#[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
 
 use anyhow::Result;
 use indicatif::HumanBytes;
@@ -78,6 +78,7 @@ pub fn collect_files<P: AsRef<Path>>(paths: &[P]) -> FileCollector {
         .into_iter()
         .map(|path| {
             WalkDir::new(path)
+                .follow_links(true)
                 .into_iter()
                 .filter_map(|entry| entry.ok())
                 .filter_map(|entry| match entry.metadata() {
@@ -351,5 +352,3 @@ pub fn is_file<P: AsRef<Path>>(path: P) -> bool {
     }
 }
 
-#[cfg(test)]
-mod test {}
