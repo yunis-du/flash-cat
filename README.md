@@ -15,6 +15,13 @@ Securely send the file folder from one computer to another computer.
 https://github.com/yunis-du/flash-cat/releases
 ```
 
+### Use yum install
+Systems for yum package managers, such as CentOS, RockyLinux, etc. Currently, only amd64 and arm64 architectures are supported.
+
+```bash
+curl -o /etc/yum.repos.d/flash-cat.repo http://repo.duyunzhi.cn/rpm/flash-cat/flash-cat.repo && sudo yum install flash-cat -y
+```
+
 ### On macOS you can install the latest release with Homebrew
 ```bash
 brew tap yunis-du/brew
