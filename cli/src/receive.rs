@@ -36,7 +36,7 @@ impl Receive {
                         self.shutdown();
                     }
                     ReceiverInteractionMessage::SendFilesRequest(send_req) => {
-                        print!("Receiving {}", send_req.num_files);
+                        print!("Receiving {} files", send_req.num_files);
                         if send_req.num_folders > 0 {
                             print!(" and {} folders", send_req.num_folders);
                         }
