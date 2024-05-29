@@ -1,6 +1,6 @@
 use std::fmt;
 
-pub const CLI_VERSION: &'static str = "0.1.2";
+pub const CLI_VERSION: &'static str = "0.1.3";
 pub const RELAY_VERSION: &'static str = "0.1.1";
 
 pub struct VersionInfo {
