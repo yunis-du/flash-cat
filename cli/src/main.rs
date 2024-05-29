@@ -52,6 +52,10 @@ struct RecvCmd {
     /// Relay address (default: public relay [https://flashcat.duyunzhi.cn])
     #[clap(long)]
     relay: Option<String>,
+
+    /// Automatically answer yes for all questions
+    #[clap(short= 'y', long)]
+    assumeyes: bool,
 }
 
 const VERSION_INFO: &'static VersionInfo = &VersionInfo {
@@ -108,7 +112,7 @@ async fn recv(recv_cmd: RecvCmd) -> Result<()> {
     #[cfg(windows)]
     let sigint = ctrl_c();
 
-    let receive = Receive::new(recv_cmd.share_code, recv_cmd.relay)?;
+    let receive = Receive::new(recv_cmd.share_code, recv_cmd.relay, recv_cmd.assumeyes)?;
 
     let receive_task = async { receive.run().await };
 

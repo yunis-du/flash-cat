@@ -1,4 +1,8 @@
-use std::{io::{stdin, stdout, Write}, pin::pin, time::Duration};
+use std::{
+    io::{stdin, stdout, Write},
+    pin::pin,
+    time::Duration,
+};
 
 use anyhow::Result;
 use flash_cat_common::Shutdown;
@@ -11,15 +15,17 @@ use crate::progress::Progress;
 #[derive(Clone)]
 pub struct Receive {
     receiver: FlashCatReceiver,
+    assumeyes: bool,
 
     shutdown: Shutdown,
 }
 
 impl Receive {
-    pub fn new(share_code: String, specify_relay: Option<String>) -> Result<Self> {
+    pub fn new(share_code: String, specify_relay: Option<String>, assumeyes: bool) -> Result<Self> {
         let receiver = FlashCatReceiver::new(share_code, specify_relay)?;
         Ok(Self {
             receiver,
+            assumeyes,
             shutdown: Shutdown::new(),
         })
     }
@@ -32,13 +38,25 @@ impl Receive {
                 match receiver_msg {
                     ReceiverInteractionMessage::Message(msg) => println!("{msg}"),
                     ReceiverInteractionMessage::Error(e) => {
-                        println!("An error occurred: {}", e.to_string());
+                        if e.contains("NotFound") {
+                            println!("Not found, Please check share code.");
+                        } else {
+                            println!("An error occurred: {}", e.to_string());
+                        }
                         self.shutdown();
                     }
                     ReceiverInteractionMessage::SendFilesRequest(send_req) => {
                         print!("Receiving {} files", send_req.num_files);
                         if send_req.num_folders > 0 {
                             print!(" and {} folders", send_req.num_folders);
+                        }
+                        if self.assumeyes {
+                            progress
+                                .update(send_req.num_files, send_req.max_file_name_length as usize);
+                            self.receiver
+                                .send_confirm(ReceiverConfirm::ReceiveConfirm(true))
+                                .await?;
+                            continue;
                         }
                         print!(" ({})? (Y/n) ", HumanBytes(send_req.total_size).to_string());
                         stdout().flush()?;
@@ -61,6 +79,15 @@ impl Receive {
                         }
                     }
                     ReceiverInteractionMessage::FileDuplication(file_duplication) => {
+                        if self.assumeyes {
+                            self.receiver
+                                .send_confirm(ReceiverConfirm::FileConfirm((
+                                    true,
+                                    file_duplication.file_id,
+                                )))
+                                .await?;
+                            continue;
+                        }
                         print!("overwrite '{}'? (Y/n) ", file_duplication.filename);
                         stdout().flush()?;
                         let mut input = String::new();
