@@ -51,6 +51,7 @@ impl Receive {
                             print!(" and {} folders", send_req.num_folders);
                         }
                         if self.assumeyes {
+                            stdout().flush()?;
                             progress
                                 .update(send_req.num_files, send_req.max_file_name_length as usize);
                             self.receiver
