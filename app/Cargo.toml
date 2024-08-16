@@ -1,9 +1,30 @@
 [package]
 name = "flash_cat_app"
 authors.workspace = true
+license.workspace = true
 version.workspace = true
 edition.workspace = true
+repository.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name="flash-cat-app"
+path="src/main.rs"
+
 [dependencies]
+flash_cat_common.workspace = true
+
+anyhow.workspace = true
+serde.workspace = true
+log.workspace = true
+iced = { version = "0.12.1", features = ["image", "svg"] }
+iced_aw = "0.9.3"
+webbrowser = "1.0.1"
+rfd = "0.14.1"
+directories = "5.0.1"
+open = "5.3.0"
+toml = "0.8.19"
+
+[build-dependencies]
+built = { version = "0.7.4", features = ["chrono", "git2"] }
