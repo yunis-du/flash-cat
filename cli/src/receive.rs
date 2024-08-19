@@ -21,8 +21,13 @@ pub struct Receive {
 }
 
 impl Receive {
-    pub fn new(share_code: String, specify_relay: Option<String>, assumeyes: bool) -> Result<Self> {
-        let receiver = FlashCatReceiver::new(share_code, specify_relay)?;
+    pub fn new(
+        share_code: String,
+        specify_relay: Option<String>,
+        output: Option<String>,
+        assumeyes: bool,
+    ) -> Result<Self> {
+        let receiver = FlashCatReceiver::new(share_code, specify_relay, output)?;
         Ok(Self {
             receiver,
             assumeyes,
@@ -89,7 +94,7 @@ impl Receive {
                                 .await?;
                             continue;
                         }
-                        print!("overwrite '{}'? (Y/n) ", file_duplication.filename);
+                        print!("overwrite '{}'? (Y/n) ", file_duplication.path);
                         stdout().flush()?;
                         let mut input = String::new();
                         stdin().read_line(&mut input)?;

@@ -1,5 +1,11 @@
 use anyhow::{Context, Result};
-use std::{collections::HashMap, net::SocketAddr, path::Path, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    path::Path,
+    sync::{Arc, LazyLock, RwLock},
+    time::Duration,
+};
 use tokio::{fs, io::AsyncWriteExt, sync::mpsc, time::MissedTickBehavior};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tonic::transport::Endpoint;
@@ -21,6 +27,8 @@ use crate::{
     SendFilesRequest, PING_INTERVAL,
 };
 
+static OUT_DIR: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new("".to_string()));
+
 #[derive(Clone)]
 pub struct FlashCatReceiver {
     encryptor: Arc<Encryptor>,
@@ -31,7 +39,14 @@ pub struct FlashCatReceiver {
 }
 
 impl FlashCatReceiver {
-    pub fn new(share_code: String, specify_relay: Option<String>) -> Result<Self> {
+    pub fn new(
+        share_code: String,
+        specify_relay: Option<String>,
+        output: Option<String>,
+    ) -> Result<Self> {
+        if output.is_some() {
+            *OUT_DIR.write().unwrap() = output.unwrap().clone();
+        }
         let encryptor = Arc::new(Encryptor::new(share_code)?);
         let (confirm_tx, confirm_rx) = async_channel::bounded(10);
         Ok(Self {
@@ -259,8 +274,9 @@ impl FlashCatReceiver {
                                         },
                                     )),
                                 });
+                                let absolute_path = Path::new(OUT_DIR.read().unwrap().as_str()).join(new_file_req.relative_path.as_str());
                                 if new_file_req.is_empty_dir {
-                                    tokio::fs::create_dir_all(new_file_req.relative_path.as_str())
+                                    tokio::fs::create_dir_all(&absolute_path)
                                         .await?;
                                     Self::send_msg_to_relay(&tx, accept_msg).await?;
                                     continue;
@@ -271,19 +287,18 @@ impl FlashCatReceiver {
                                     ReceiverInteractionMessage::RecvNewFile(RecvNewFile {
                                         file_id: new_file_req.file_id,
                                         filename: new_file_req.filename.clone(),
-                                        path: new_file_req.relative_path.clone(),
+                                        path: absolute_path.to_string_lossy().to_string(),
                                         size: new_file_req.total_size,
                                     }),
                                 )
                                 .await?;
 
-                                let relative_path = Path::new(new_file_req.relative_path.as_str());
-                                if relative_path.exists() {
+                                if absolute_path.exists() {
                                     let recv_file = RecvFile::new(
                                         fs::File::options()
                                             .write(true)
                                             .read(true)
-                                            .open(new_file_req.relative_path.as_str())
+                                            .open(&absolute_path)
                                             .await?,
                                     );
                                     recv_files.insert(new_file_req.file_id, recv_file);
@@ -294,19 +309,19 @@ impl FlashCatReceiver {
                                             FileDuplication {
                                                 file_id: new_file_req.file_id,
                                                 filename: new_file_req.filename.clone(),
-                                                path: new_file_req.relative_path.clone(),
+                                                path: absolute_path.to_string_lossy().to_string(),
                                             },
                                         ),
                                     )
                                     .await?;
                                     continue;
                                 } else {
-                                    let parent = relative_path.parent().unwrap_or(Path::new(""));
+                                    let parent = absolute_path.parent().unwrap_or(Path::new(""));
                                     if !parent.exists() && !parent.to_string_lossy().is_empty() {
                                         fs::create_dir_all(parent).await?;
                                     }
                                     let recv_file = RecvFile::new(
-                                        fs::File::create(new_file_req.relative_path.as_str())
+                                        fs::File::create(&absolute_path)
                                             .await?,
                                     );
                                     recv_files.insert(new_file_req.file_id, recv_file);
