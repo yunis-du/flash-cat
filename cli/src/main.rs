@@ -3,11 +3,11 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use flash_cat_cli::{receive::Receive, send::Send};
-use flash_cat_common::{VersionInfo, CLI_VERSION};
-#[cfg(unix)]
-use tokio::signal::unix::{signal, SignalKind};
+use flash_cat_common::{utils::fs::is_file, VersionInfo, CLI_VERSION};
 #[cfg(windows)]
 use tokio::signal::ctrl_c;
+#[cfg(unix)]
+use tokio::signal::unix::{signal, SignalKind};
 
 #[derive(Parser, Debug)]
 #[clap(name = "flash-cat-cli")]
@@ -53,8 +53,12 @@ struct RecvCmd {
     #[clap(long)]
     relay: Option<String>,
 
+    /// The save path of the received file(s) or folder(s)
+    #[clap(short = 'o', long)]
+    output: Option<String>,
+
     /// Automatically answer yes for all questions
-    #[clap(short= 'y', long)]
+    #[clap(short = 'y', long)]
     assumeyes: bool,
 }
 
@@ -112,7 +116,18 @@ async fn recv(recv_cmd: RecvCmd) -> Result<()> {
     #[cfg(windows)]
     let sigint = ctrl_c();
 
-    let receive = Receive::new(recv_cmd.share_code, recv_cmd.relay, recv_cmd.assumeyes)?;
+    if recv_cmd.output.is_some() {
+        if is_file(recv_cmd.output.clone().unwrap().as_str()) {
+            return Err(anyhow::Error::msg("The output path is a file."));
+        }
+    }
+
+    let receive = Receive::new(
+        recv_cmd.share_code,
+        recv_cmd.relay,
+        recv_cmd.output,
+        recv_cmd.assumeyes,
+    )?;
 
     let receive_task = async { receive.run().await };
 
