@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use flash_cat_cli::{receive::Receive, send::Send};
 use flash_cat_common::{utils::fs::is_file, VersionInfo, CLI_VERSION};
 #[cfg(windows)]
@@ -186,6 +186,8 @@ fn main() -> ExitCode {
                 };
             }
         }
+    } else {
+        Cmd::command().print_help().unwrap();
     }
     ExitCode::SUCCESS
 }
