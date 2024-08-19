@@ -184,7 +184,7 @@ pub mod title_bar {
 }
 
 fn logo_widget() -> Element<'static, Message> {
-    let logo_image = image(image::Handle::from_memory(assets::logos::IMG_LOGO)).height(70.0);
+    let logo_image = image(image::Handle::from_memory(assets::logos::IMG_LOGO)).height(65.0);
     let logo_text = text("Flash Cat")
         .size(20)
         .font(Font {
