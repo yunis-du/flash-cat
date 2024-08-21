@@ -1,6 +1,6 @@
 use iced::{
     widget::{column, container, radio, text, Column, Space},
-    Command, Element,
+    Command, Element, Length,
 };
 
 use super::settings_config::{Theme, ALL_THEMES, SETTINGS};
@@ -64,7 +64,7 @@ impl Appearance {
 
         container(content)
             .style(styles::container_styles::first_class_container_rounded_theme())
-            .width(1000)
+            .width(Length::Fill)
             .into()
     }
 }

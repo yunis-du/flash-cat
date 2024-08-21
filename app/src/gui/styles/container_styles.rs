@@ -4,36 +4,28 @@ use iced::widget::container::{Appearance, StyleSheet};
 use iced::{color, Color};
 use iced::{Background, Border};
 
-/// A custom theme for container respecting Light and Dark TroxideTheme
+/// A custom theme for container respecting Light and Dark FlashCatTheme
 pub fn first_class_container_rounded_theme() -> Container {
     Container::Custom(
         Box::new(FirstClassContainerRoundedTheme) as Box<dyn StyleSheet<Style = iced::Theme>>
     )
 }
 
-/// A custom theme for container respecting Light and Dark TroxideTheme
+/// A custom theme for container respecting Light and Dark FlashCatTheme
 pub fn second_class_container_rounded_theme() -> Container {
     Container::Custom(
         Box::new(SecondClassContainerRoundedTheme) as Box<dyn StyleSheet<Style = iced::Theme>>
     )
 }
 
-/// A custom theme for container respecting Light and Dark TroxideTheme
-/// designed specifically for the release time container in my_shows page
-pub fn release_time_container_theme() -> Container {
-    Container::Custom(
-        Box::new(ContainerThemeReleaseTime) as Box<dyn StyleSheet<Style = iced::Theme>>
-    )
-}
-
-/// A custom theme for container respecting Light and Dark TroxideTheme designed for the tabs
+/// A custom theme for container respecting Light and Dark FlashCatTheme designed for the tabs
 pub fn first_class_container_square_theme() -> Container {
     Container::Custom(
         Box::new(FirstClassContainerSquareTheme) as Box<dyn StyleSheet<Style = iced::Theme>>
     )
 }
 
-/// A custom theme for container respecting Light and Dark TroxideTheme designed for the tabs
+/// A custom theme for container respecting Light and Dark FlashCatTheme designed for the tabs
 pub fn second_class_container_square_theme() -> Container {
     Container::Custom(
         Box::new(SecondClassContainerSquareTheme) as Box<dyn StyleSheet<Style = iced::Theme>>

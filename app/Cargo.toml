@@ -14,6 +14,7 @@ path="src/main.rs"
 
 [dependencies]
 flash_cat_common.workspace = true
+flash_cat_core.workspace = true
 
 anyhow.workspace = true
 serde.workspace = true

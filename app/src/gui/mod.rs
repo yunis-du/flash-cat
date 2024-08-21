@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use iced::{
-    font::Weight, widget::{column, container, image, row, text}, Application, Command, Element, Font, Length
+    font::Weight,
+    widget::{column, container, image, row, text},
+    Application, Command, Element, Font, Length,
 };
 use tabs::{
     settings_tab::settings_config::{self, SETTINGS},
@@ -10,6 +12,7 @@ use tabs::{
 use title_bar::{Message as TitleBarMessage, TitleBar};
 
 pub mod assets;
+pub mod progress;
 pub mod styles;
 pub mod tabs;
 
@@ -62,7 +65,6 @@ impl<'a> Application for FlashCatApp {
                             .switch_to_tab(tab_id)
                             .map(Message::TabsController)
                     }
-                    TitleBarMessage::BackButtonPressed => Command::none(),
                 }
             }
             Message::TabsController(message) => Command::batch([self
@@ -76,7 +78,7 @@ impl<'a> Application for FlashCatApp {
         column![
             logo_widget(),
             self.title_bar
-                .view(&self.tabs_controller.get_labels(), false)
+                .view(&self.tabs_controller.get_labels())
                 .map(Message::TitleBar),
             self.tabs_controller.view().map(Message::TabsController)
         ]
@@ -102,17 +104,14 @@ impl<'a> Application for FlashCatApp {
 }
 
 pub mod title_bar {
-    use iced::widget::{
-        button, container, horizontal_space, mouse_area, row, svg, text, Row, Space,
-    };
-    use iced::{Element, Length};
+    use iced::widget::{container, horizontal_space, mouse_area, row, svg, text, Row};
+    use iced::{Alignment, Length};
 
-    use crate::gui::{assets::icons::CARET_LEFT_FILL, styles, tabs::TabLabel};
+    use crate::gui::{styles, tabs::TabLabel};
 
     #[derive(Clone, Debug)]
     pub enum Message {
         TabSelected(usize),
-        BackButtonPressed,
     }
 
     pub struct TitleBar {
@@ -127,25 +126,25 @@ pub mod title_bar {
         }
 
         pub fn update(&mut self, message: Message) {
-            if let Message::TabSelected(new_active_tab) = message {
-                self.active_tab = new_active_tab
+            match message {
+                Message::TabSelected(new_active_tab) => self.active_tab = new_active_tab,
             }
         }
 
-        pub fn view(
-            &self,
-            tab_labels: &[TabLabel],
-            show_back_button: bool,
-        ) -> iced::Element<'_, Message> {
+        pub fn view(&self, tab_labels: &[TabLabel]) -> iced::Element<'_, Message> {
             let tab_views = tab_labels.iter().enumerate().map(|(index, tab_label)| {
                 let svg_handle = svg::Handle::from_memory(tab_label.icon);
                 let icon = svg(svg_handle)
                     .width(Length::Shrink)
                     .style(styles::svg_styles::colored_svg_theme());
-                let text_label = text(tab_label.text);
+                let text_label = text(tab_label.text).size(18);
                 let mut tab = container(
-                    mouse_area(row![icon, text_label].spacing(5))
-                        .on_press(Message::TabSelected(index)),
+                    mouse_area(
+                        row![icon, text_label]
+                            .align_items(Alignment::Center)
+                            .spacing(5),
+                    )
+                    .on_press(Message::TabSelected(index)),
                 )
                 .padding(5);
 
@@ -158,27 +157,9 @@ pub mod title_bar {
 
             let tab_views = Row::with_children(tab_views).spacing(10);
 
-            let back_button: Element<'_, Message> = if show_back_button {
-                let back_button_icon_handle = svg::Handle::from_memory(CARET_LEFT_FILL);
-                let icon = svg(back_button_icon_handle)
-                    .width(20)
-                    .style(styles::svg_styles::colored_svg_theme());
-                button(icon)
-                    .on_press(Message::BackButtonPressed)
-                    .style(styles::button_styles::transparent_button_theme())
-                    .into()
-            } else {
-                Space::new(0, 0).into()
-            };
-
-            container(row![
-                back_button,
-                horizontal_space(),
-                tab_views,
-                horizontal_space()
-            ])
-            .style(styles::container_styles::first_class_container_square_theme())
-            .into()
+            container(row![horizontal_space(), tab_views, horizontal_space()])
+                .style(styles::container_styles::first_class_container_square_theme())
+                .into()
         }
     }
 }
@@ -192,9 +173,13 @@ fn logo_widget() -> Element<'static, Message> {
             ..Default::default()
         })
         .style(styles::text_styles::brown_text_theme());
-    container(row![logo_image, logo_text].align_items(iced::Alignment::Center).spacing(10))
-        .width(Length::Fill)
-        .center_x()
-        .center_y()
-        .into()
+    container(
+        row![logo_image, logo_text]
+            .align_items(iced::Alignment::Center)
+            .spacing(10),
+    )
+    .width(Length::Fill)
+    .center_x()
+    .center_y()
+    .into()
 }

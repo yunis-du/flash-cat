@@ -3,13 +3,41 @@ use std::path::PathBuf;
 
 use rfd::AsyncFileDialog;
 
-pub async fn chosen_path() -> anyhow::Result<Option<PathBuf>> {
-    let chosen_path = AsyncFileDialog::new()
+pub async fn pick_floder() -> anyhow::Result<Option<PathBuf>> {
+    let pick_path = AsyncFileDialog::new()
         .set_directory(get_home_directory()?)
         .pick_folder()
         .await
         .map(|file_handle| file_handle.path().to_owned());
-    Ok(chosen_path)
+    Ok(pick_path)
+}
+
+pub async fn pick_floders() -> anyhow::Result<Option<Vec<PathBuf>>> {
+    let pick_path = AsyncFileDialog::new()
+        .set_directory(get_home_directory()?)
+        .pick_folders()
+        .await
+        .map(|file_handles| {
+            file_handles
+                .iter()
+                .map(|file_handle| file_handle.path().to_owned())
+                .collect()
+        });
+    Ok(pick_path)
+}
+
+pub async fn pick_files() -> anyhow::Result<Option<Vec<PathBuf>>> {
+    let pick_path = AsyncFileDialog::new()
+        .set_directory(get_home_directory()?)
+        .pick_files()
+        .await
+        .map(|file_handles| {
+            file_handles
+                .iter()
+                .map(|file_handle| file_handle.path().to_owned())
+                .collect()
+        });
+    Ok(pick_path)
 }
 
 pub fn get_home_directory() -> anyhow::Result<PathBuf> {

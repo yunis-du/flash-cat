@@ -6,7 +6,7 @@ use iced::widget::{
 use iced::{mouse, Command, Element};
 
 use super::settings_config::SETTINGS;
-use crate::folder::chosen_path;
+use crate::folder::pick_floder;
 use crate::gui::styles;
 
 #[derive(Debug, Clone)]
@@ -51,7 +51,7 @@ impl General {
                 let _ = open::that(Path::new(path.as_str()));
                 Command::none()
             }
-            Message::ModifySavePath => Command::perform(chosen_path(), |result| {
+            Message::ModifySavePath => Command::perform(pick_floder(), |result| {
                 Message::UpdateSavePath(result.map_err(|err| err.to_string()))
             }),
             Message::UpdateSavePath(save_path_result) => {

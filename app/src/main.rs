@@ -7,8 +7,9 @@ fn main() -> Result<()> {
 
     FlashCatApp::run(Settings {
         window: iced::window::Settings {
-            size: Size::new(480.0, 660.0),
+            size: Size::new(480.0, 680.0),
             icon,
+            resizable: false,
             ..Default::default()
         },
         default_text_size: 14.0.into(),
