@@ -1,6 +1,6 @@
 use std::{
     io::{stdin, stdout, Write},
-    pin::pin,
+    sync::Arc,
     time::Duration,
 };
 
@@ -36,7 +36,7 @@ impl Receive {
     }
 
     pub async fn run(&self) -> Result<()> {
-        let mut stream = pin!(self.receiver.start().await?);
+        let mut stream = Arc::new(self.receiver.clone()).start().await?;
         let mut progress = Progress::new(1, 10);
         while !self.shutdown.is_terminated() {
             if let Some(receiver_msg) = stream.next().await {
@@ -56,7 +56,7 @@ impl Receive {
                             print!(" and {} folders", send_req.num_folders);
                         }
                         if self.assumeyes {
-                            stdout().flush()?;
+                            println!();
                             progress
                                 .update(send_req.num_files, send_req.max_file_name_length as usize);
                             self.receiver

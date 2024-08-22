@@ -2,8 +2,8 @@ use std::{
     env,
     io::{stdout, Write},
     path::PathBuf,
-    pin::pin,
     process,
+    sync::Arc,
 };
 
 use anyhow::Result;
@@ -65,7 +65,7 @@ impl Send {
             progress.add_progress(&file.name, file.file_id, file.size);
         }
 
-        let mut stream = pin!(self.sender.start().await?);
+        let mut stream = Arc::new(self.sender.clone()).start().await?;
         while !self.shutdown.is_terminated() {
             if let Some(sender_msg) = stream.next().await {
                 match sender_msg {
@@ -112,6 +112,7 @@ impl Send {
                 }
             }
         }
+
         print!("\r{}", format!("{:<width$}", "", width = 100));
         stdout().flush()?;
         print!("\r");

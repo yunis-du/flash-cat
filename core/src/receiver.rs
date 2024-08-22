@@ -3,11 +3,12 @@ use std::{
     collections::HashMap,
     net::SocketAddr,
     path::Path,
+    pin::Pin,
     sync::{Arc, LazyLock, RwLock},
     time::Duration,
 };
 use tokio::{fs, io::AsyncWriteExt, sync::mpsc, time::MissedTickBehavior};
-use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
+use tokio_stream::{wrappers::ReceiverStream as TokioReceiverStream, Stream, StreamExt};
 use tonic::transport::Endpoint;
 
 use flash_cat_common::{
@@ -28,6 +29,9 @@ use crate::{
 };
 
 static OUT_DIR: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new("".to_string()));
+
+/// Receiver stream
+pub type ReceiverStream = Pin<Box<dyn Stream<Item = ReceiverInteractionMessage> + Send>>;
 
 #[derive(Clone)]
 pub struct FlashCatReceiver {
@@ -58,9 +62,7 @@ impl FlashCatReceiver {
         })
     }
 
-    pub async fn start(
-        &self,
-    ) -> Result<(impl Stream<Item = ReceiverInteractionMessage> + Send + '_)> {
+    pub async fn start(self: Arc<Self>) -> Result<ReceiverStream> {
         let (receiver_stream_tx, mut receiver_stream_rx) = mpsc::channel(1024);
 
         if self.specify_relay.is_some() {
@@ -92,7 +94,7 @@ impl FlashCatReceiver {
         }
         // resolve shutdown when receiver_stream_rx is no message will cause panic
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
-        Ok(async_stream::stream! {
+        Ok(Box::pin(async_stream::stream! {
             while !self.shutdown.is_terminated() {
                 tokio::select! {
                     Some(sender_stream) = receiver_stream_rx.recv() => {
@@ -101,7 +103,7 @@ impl FlashCatReceiver {
                     _ = interval.tick() =>(),
                 }
             }
-        })
+        }))
     }
 
     pub async fn send_confirm(&self, confirm: ReceiverConfirm) -> Result<()> {
@@ -167,7 +169,7 @@ impl FlashCatReceiver {
 
         let mut recv_files = HashMap::new();
 
-        let resp = client.channel(ReceiverStream::new(rx)).await?;
+        let resp = client.channel(TokioReceiverStream::new(rx)).await?;
         let mut messages = resp.into_inner(); // A stream of relay messages.
 
         let mut ping_interval = tokio::time::interval(PING_INTERVAL);
@@ -274,10 +276,10 @@ impl FlashCatReceiver {
                                         },
                                     )),
                                 });
-                                let absolute_path = Path::new(OUT_DIR.read().unwrap().as_str()).join(new_file_req.relative_path.as_str());
+                                let absolute_path = Path::new(OUT_DIR.read().unwrap().as_str())
+                                    .join(new_file_req.relative_path.as_str());
                                 if new_file_req.is_empty_dir {
-                                    tokio::fs::create_dir_all(&absolute_path)
-                                        .await?;
+                                    tokio::fs::create_dir_all(&absolute_path).await?;
                                     Self::send_msg_to_relay(&tx, accept_msg).await?;
                                     continue;
                                 }
@@ -320,10 +322,8 @@ impl FlashCatReceiver {
                                     if !parent.exists() && !parent.to_string_lossy().is_empty() {
                                         fs::create_dir_all(parent).await?;
                                     }
-                                    let recv_file = RecvFile::new(
-                                        fs::File::create(&absolute_path)
-                                            .await?,
-                                    );
+                                    let recv_file =
+                                        RecvFile::new(fs::File::create(&absolute_path).await?);
                                     recv_files.insert(new_file_req.file_id, recv_file);
                                 }
 
