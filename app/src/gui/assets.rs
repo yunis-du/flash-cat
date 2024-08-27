@@ -12,8 +12,22 @@ pub mod icons {
 }
 
 pub mod fonts {
-    pub static NOTOSANS_REGULAR_STATIC: &[u8] =
-        include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+    use std::borrow::Cow;
+
+    pub static SOURCE_HAN_SANS_CN: &'static str = "Source Han Sans CN";
+
+    pub static FONTS: &[Cow<'static, [u8]>] = &[
+        // Source Han Sans CN
+        Cow::Borrowed(include_bytes!("../../assets/fonts/SourceHanSansCN-Bold.otf").as_slice()),
+        Cow::Borrowed(
+            include_bytes!("../../assets/fonts/SourceHanSansCN-ExtraLight.otf").as_slice(),
+        ),
+        Cow::Borrowed(include_bytes!("../../assets/fonts/SourceHanSansCN-Heavy.otf").as_slice()),
+        Cow::Borrowed(include_bytes!("../../assets/fonts/SourceHanSansCN-Light.otf").as_slice()),
+        Cow::Borrowed(include_bytes!("../../assets/fonts/SourceHanSansCN-Medium.otf").as_slice()),
+        Cow::Borrowed(include_bytes!("../../assets/fonts/SourceHanSansCN-Normal.otf").as_slice()),
+        Cow::Borrowed(include_bytes!("../../assets/fonts/SourceHanSansCN-Regular.otf").as_slice()),
+    ];
 }
 
 pub mod logos {
