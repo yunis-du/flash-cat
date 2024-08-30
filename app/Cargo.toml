@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
+rust-version.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -19,7 +20,9 @@ flash_cat_core.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 log.workspace = true
-iced = { version = "0.12.1", features = ["image", "svg"] }
+tokio.workspace = true
+indicatif.workspace = true
+iced = { version = "0.12.1", features = ["image", "svg", "tokio"] }
 iced_aw = "0.9.3"
 webbrowser = "1.0.1"
 rfd = "0.14.1"

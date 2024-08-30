@@ -45,12 +45,18 @@ impl<'a> Application for FlashCatApp {
                 title_bar: TitleBar::new(),
                 tabs_controller,
             },
-            Command::batch([tabs_controller_command.map(Message::TabsController)]),
+            tabs_controller_command.map(Message::TabsController),
         )
     }
 
     fn title(&self) -> String {
         format!("FlashCat - {}", self.active_tab.to_string())
+    }
+
+    fn subscription(&self) -> iced::Subscription<Message> {
+        self.tabs_controller
+            .subscription()
+            .map(Message::TabsController)
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {

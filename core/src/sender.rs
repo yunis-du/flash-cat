@@ -30,7 +30,7 @@ pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
 /// Sender stream
 pub type SenderStream = Pin<Box<dyn Stream<Item = SenderInteractionMessage> + Send>>;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct FlashCatSender {
     zip_files: Vec<String>,
     encryptor: Arc<Encryptor>,
@@ -60,6 +60,24 @@ impl FlashCatSender {
         let encryptor = Arc::new(Encryptor::new(share_code)?);
         Ok(Self {
             zip_files,
+            encryptor,
+            specify_relay,
+            file_collector: Arc::new(file_collector),
+            local_relay_shutdown: Shutdown::new(),
+            public_relay_shutdown: Shutdown::new(),
+            shutdown,
+        })
+    }
+
+    pub fn new_with_file_collector(
+        share_code: String,
+        specify_relay: Option<String>,
+        file_collector: FileCollector,
+    ) -> Result<Self> {
+        let shutdown = Shutdown::new();
+        let encryptor = Arc::new(Encryptor::new(share_code)?);
+        Ok(Self {
+            zip_files: vec![],
             encryptor,
             specify_relay,
             file_collector: Arc::new(file_collector),

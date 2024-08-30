@@ -8,13 +8,14 @@ use std::{
 };
 
 use anyhow::Result;
-use indicatif::HumanBytes;
 #[cfg(feature = "progress")]
 use indicatif::{ProgressBar, ProgressStyle};
 use walkdir::WalkDir;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::Shutdown;
+
+use super::human_bytes;
 
 #[derive(Debug, Default, Clone)]
 pub struct FileInfo {
@@ -67,7 +68,7 @@ impl FileCollector {
     }
 
     pub fn total_size_to_human_readable(&self) -> String {
-        HumanBytes(self.total_size).to_string()
+        human_bytes(self.total_size)
     }
 }
 
@@ -351,4 +352,3 @@ pub fn is_file<P: AsRef<Path>>(path: P) -> bool {
         false
     }
 }
-

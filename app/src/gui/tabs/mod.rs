@@ -99,10 +99,7 @@ pub struct TabsController {
     receiver_tab: ReceiverTab,
     settings_tab: SettingsTab,
     tabs_scrollable_offsets: [RelativeOffset; 3],
-    // series_page_sender: mpsc::Sender<SeriesMainInformation>,
 }
-
-
 
 impl TabsController {
     pub fn new() -> (Self, Command<Message>) {
@@ -155,10 +152,8 @@ impl TabsController {
         let index: usize = self.current_tab.into();
 
         match self.current_tab {
-            TabId::Sender => {
-                SenderTab::set_scrollable_offset(self.tabs_scrollable_offsets[index])
-                    .map(Message::Sender)
-            }
+            TabId::Sender => SenderTab::set_scrollable_offset(self.tabs_scrollable_offsets[index])
+                .map(Message::Sender),
             TabId::Receiver => {
                 ReceiverTab::set_scrollable_offset(self.tabs_scrollable_offsets[index])
                     .map(Message::Receiver)
@@ -182,6 +177,10 @@ impl TabsController {
         };
 
         Command::batch([self.restore_scrollable_offset(), tab_command])
+    }
+
+    pub fn subscription(&self) -> iced::Subscription<Message> {
+        iced::Subscription::batch([self.sender_tab.subscription().map(Message::Sender)])
     }
 
     pub fn update(&mut self, message: Message) -> Command<Message> {
