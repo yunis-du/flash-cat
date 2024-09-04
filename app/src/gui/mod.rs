@@ -12,7 +12,7 @@ use tabs::{
 use title_bar::{Message as TitleBarMessage, TitleBar};
 
 pub mod assets;
-pub mod progress;
+pub mod progress_bar_widget;
 pub mod styles;
 pub mod tabs;
 

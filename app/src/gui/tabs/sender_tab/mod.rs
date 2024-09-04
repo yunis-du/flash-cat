@@ -1,34 +1,50 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, RwLock};
-use std::time::Duration;
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, LazyLock, RwLock,
+    },
+    time::Duration,
+};
 
-use flash_cat_common::consts::PUBLIC_RELAY;
-use flash_cat_common::utils::gen_share_code;
+use flash_cat_core::sender::FlashCatSender;
+use iced::widget::{
+    scrollable::{Id, RelativeOffset, Viewport},
+    Column,
+};
 use iced::{
     font, mouse,
     widget::{button, column, container, horizontal_space, mouse_area, row, scrollable, svg, text},
     Alignment, Command, Element, Font, Length,
 };
-use picked_body_widget::{Message as PickedBodyMessage, PickedBody};
+use sender::send;
 
-use crate::gui::assets::icons::{COPY_ICON, TICK_ICON};
+use super::{settings_tab::settings_config::SETTINGS, Tab};
 use crate::{
     folder::{pick_files, pick_floders},
-    gui::{assets::icons::SENDER_ICON, styles},
+    gui::{
+        assets::icons::{COPY_ICON, REMOVE_ICON, SENDER_ICON, TICK_ICON},
+        progress_bar_widget::{
+            Message as ProgressBarMessage, ProgressBar, State as ProgressBarState,
+        },
+        styles,
+    },
+};
+use flash_cat_common::{
+    consts::PUBLIC_RELAY,
+    utils::{
+        fs::{collect_files, FileCollector},
+        gen_share_code,
+    },
 };
 
-use super::settings_tab::settings_config::SETTINGS;
-use super::Tab;
-
-mod picked_body_widget;
 mod sender;
 
 pub(super) static SENDER_STATE: LazyLock<RwLock<SenderState>> =
     LazyLock::new(|| RwLock::new(SenderState::Idle));
 
-pub(super) static SENDER_STREAM_STATE: LazyLock<RwLock<SenderStreamState>> =
-    LazyLock::new(|| RwLock::new(SenderStreamState::Normal));
+pub(super) static SENDER_NOTIFICATION: LazyLock<RwLock<SenderNotification>> =
+    LazyLock::new(|| RwLock::new(SenderNotification::Normal));
 
 static COPYED_BUTTON_STATE: LazyLock<AtomicBool> = LazyLock::new(|| AtomicBool::new(false));
 
@@ -37,12 +53,13 @@ pub(super) enum SenderState {
     Idle,
     Picked,
     AwaitingReceive,
+    Reject,
     Sending,
     SendDone,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum SenderStreamState {
+pub(super) enum SenderNotification {
     Normal,
     Message(String),
     Errored(String),
@@ -50,69 +67,113 @@ pub(super) enum SenderStreamState {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    PageScrolled(Viewport),
     PickFiles,
     PickFloders,
     AddPickedPath(Result<Option<Vec<PathBuf>>, String>),
-    PickedBody(PickedBodyMessage),
     Send,
     Cancel,
+    SendDone,
     CopySharCode,
     ResetCopyBut,
     StartSendError(String),
     SendButtonEnter,
     SendButtonExit,
+    Remove(String),
+    RemoveAll,
+    ProgressBar(ProgressBarMessage),
+    SendProgressed((u64, sender::Progress)),
 }
 
 pub struct SenderTab {
+    scrollable_offset: RelativeOffset,
+    scrollable_id: Id,
     share_code: String,
-    picked_body: PickedBody,
     send_button_text: String,
+    paths: Vec<String>,
+    fc: Option<FileCollector>,
+    fcs: Option<Arc<FlashCatSender>>,
+    progress_bars: Vec<(String, ProgressBar)>,
+    start_send: bool,
 }
 
 impl SenderTab {
     pub fn new() -> (Self, Command<Message>) {
         (
             Self {
+                scrollable_offset: RelativeOffset::START,
+                scrollable_id: Self::scrollable_id(),
                 share_code: String::new(),
-                picked_body: PickedBody::new(Self::scrollable_id()),
                 send_button_text: String::new(),
+                paths: vec![],
+                fc: None,
+                fcs: None,
+                progress_bars: vec![],
+                start_send: false,
             },
             Command::none(),
         )
     }
 
     pub fn subscription(&self) -> iced::Subscription<Message> {
-        self.picked_body.subscription().map(Message::PickedBody)
+        let mut batch = self
+            .progress_bars
+            .iter()
+            .map(|(_, progress_bar)| progress_bar.subscription().map(Message::ProgressBar))
+            .collect::<Vec<_>>();
+
+        batch.push(if self.start_send {
+            if self.fcs.is_some() {
+                send(self.fcs.clone().unwrap()).map(Message::SendProgressed)
+            } else {
+                iced::Subscription::none()
+            }
+        } else {
+            iced::Subscription::none()
+        });
+        iced::Subscription::batch(batch)
     }
 
     pub fn update(&mut self, message: Message) -> Command<Message> {
         match message {
-            Message::PickFiles => Command::perform(pick_files(), |result| {
-                Message::AddPickedPath(result.map_err(|err| err.to_string()))
-            }),
-            Message::PickFloders => Command::perform(pick_floders(), |result| {
-                Message::AddPickedPath(result.map_err(|err| err.to_string()))
-            }),
+            Message::PageScrolled(view_port) => {
+                self.scrollable_offset = view_port.relative_offset();
+            }
+            Message::PickFiles => {
+                return Command::perform(pick_files(), |result| {
+                    Message::AddPickedPath(result.map_err(|err| err.to_string()))
+                });
+            }
+            Message::PickFloders => {
+                return Command::perform(pick_floders(), |result| {
+                    Message::AddPickedPath(result.map_err(|err| err.to_string()))
+                });
+            }
             Message::AddPickedPath(pick_paths_result) => {
                 if let Ok(paths) = pick_paths_result {
-                    *SENDER_STATE.write().unwrap() = SenderState::Picked;
                     if let Some(paths) = paths {
-                        let paths = paths
+                        let mut add_paths = paths
                             .iter()
                             .map(|p| p.to_string_lossy().to_string())
                             .collect::<Vec<_>>();
-                        self.picked_body
-                            .update(PickedBodyMessage::Add(paths))
-                            .map(Message::PickedBody)
-                    } else {
-                        Command::none()
+
+                        self.paths.retain(|path| !add_paths.contains(&path));
+                        self.paths.append(&mut add_paths);
+
+                        let fc = collect_files(self.paths.as_slice());
+                        self.progress_bars.clear();
+                        fc.files.iter().for_each(|f| {
+                            self.progress_bars.push((
+                                f.name.to_owned(),
+                                ProgressBar::new(f.file_id, f.size, fc.num_files),
+                            ))
+                        });
+                        self.fc.replace(fc);
+                        if !self.paths.is_empty() {
+                            *SENDER_STATE.write().unwrap() = SenderState::Picked;
+                        }
                     }
-                } else {
-                    Command::none()
                 }
-            }
-            Message::PickedBody(message) => {
-                self.picked_body.update(message).map(Message::PickedBody)
             }
             Message::Send => {
                 *SENDER_STATE.write().unwrap() = SenderState::AwaitingReceive;
@@ -124,38 +185,86 @@ impl SenderTab {
                     .general
                     .relay_addr
                     .to_owned();
-                let relay = if relay_addr.contains(PUBLIC_RELAY) {
+                let specify_relay = if relay_addr.contains(PUBLIC_RELAY) {
                     None
                 } else {
                     Some(relay_addr)
                 };
                 self.share_code = gen_share_code();
-                self.picked_body
-                    .update(PickedBodyMessage::StartSend(self.share_code.clone(), relay))
-                    .map(Message::PickedBody)
+
+                if self.fc.is_some() {
+                    let fcs = FlashCatSender::new_with_file_collector(
+                        self.share_code.clone(),
+                        specify_relay,
+                        self.fc.clone().unwrap(),
+                    );
+                    match fcs {
+                        Ok(fcs) => {
+                            let fcs = Arc::new(fcs);
+                            self.fcs.replace(fcs.clone());
+                            self.progress_bars.iter_mut().for_each(|(_, p)| p.start());
+                            self.start_send = true;
+                        }
+                        Err(_) => {
+                            // todo handle error
+                        }
+                    }
+                }
+            }
+            Message::Remove(path) => {
+                self.paths.retain(|p| !p.eq(&path));
+
+                let fc = collect_files(self.paths.as_slice());
+                self.progress_bars.clear();
+                fc.files.iter().for_each(|f| {
+                    self.progress_bars.push((
+                        f.name.to_owned(),
+                        ProgressBar::new(f.file_id, f.size, fc.num_files),
+                    ))
+                });
+                self.fc.replace(fc);
+                if self.paths.is_empty() {
+                    *SENDER_STATE.write().unwrap() = SenderState::Idle;
+                }
+            }
+            Message::RemoveAll => {
+                self.fc = None;
+                self.paths.clear();
+                self.progress_bars.clear();
+                *SENDER_STATE.write().unwrap() = SenderState::Idle;
             }
             Message::Cancel => {
                 *SENDER_STATE.write().unwrap() = SenderState::Picked;
                 self.send_button_text = "".to_string();
-                self.picked_body
-                    .update(PickedBodyMessage::CancelSend)
-                    .map(Message::PickedBody)
+                if let Some(fcs) = self.fcs.clone() {
+                    fcs.shutdown();
+                }
+                self.fcs = None;
+                self.start_send = false;
+            }
+            Message::SendDone => {
+                *SENDER_STATE.write().unwrap() = SenderState::Idle;
+                *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Normal;
+                self.fc = None;
+                self.fcs = None;
+                self.paths.clear();
+                self.progress_bars.clear();
+                self.start_send = false;
             }
             Message::CopySharCode => {
                 COPYED_BUTTON_STATE.store(true, Ordering::Relaxed);
-                Command::batch([
+                return Command::batch([
                     iced::clipboard::write(self.share_code.clone()),
                     Command::perform(
                         async move { tokio::time::sleep(Duration::from_secs(3)).await },
                         |_| Message::ResetCopyBut,
                     ),
-                ])
+                ]);
             }
             Message::ResetCopyBut => {
                 COPYED_BUTTON_STATE.store(false, Ordering::Relaxed);
-                Command::none()
             }
-            Message::StartSendError(_err) => Command::none(),
+            Message::StartSendError(_err) => {}
             Message::SendButtonEnter => {
                 let sender_state = SENDER_STATE.read().unwrap();
                 if sender_state.eq(&SenderState::Sending)
@@ -163,13 +272,33 @@ impl SenderTab {
                 {
                     self.send_button_text = "Cancel".to_string();
                 }
-                Command::none()
             }
             Message::SendButtonExit => {
                 self.send_button_text = "".to_string();
-                Command::none()
+            }
+            Message::ProgressBar(_) => {}
+            Message::SendProgressed((file_id, progress)) => {
+                let new_state = match progress {
+                    sender::Progress::Sent(sent) => {
+                        if !SENDER_STATE.read().unwrap().eq(&SenderState::Sending) {
+                            *SENDER_STATE.write().unwrap() = SenderState::Sending;
+                        }
+                        Some(ProgressBarState::Sending(sent))
+                    }
+                    sender::Progress::Finished => Some(ProgressBarState::Finished),
+                    sender::Progress::Skip => Some(ProgressBarState::Skip),
+                    _ => None,
+                };
+                let progress_bar = self
+                    .progress_bars
+                    .iter_mut()
+                    .find(|(_, p)| p.get_id().eq(&file_id));
+                if let Some(progress_bar) = progress_bar {
+                    progress_bar.1.update_state(new_state);
+                }
             }
         }
+        Command::none()
     }
 
     pub fn view(&self) -> Element<Message> {
@@ -182,17 +311,11 @@ impl SenderTab {
             pick_floders_button = pick_floders_button.on_press(Message::PickFloders);
         }
         let pick = column![row![
-            text("Pick file(s) or folder(s) to send").size(16),
+            text("Pick").size(16),
             horizontal_space(),
-            row![
-                text("Pick:")
-                    .size(16)
-                    .style(styles::text_styles::accent_color_theme()),
-                pick_files_button,
-                pick_floders_button
-            ]
-            .align_items(Alignment::Center)
-            .spacing(5),
+            row![pick_files_button, pick_floders_button]
+                .align_items(Alignment::Center)
+                .spacing(5),
         ]
         .align_items(Alignment::Center)]
         .padding(5);
@@ -219,6 +342,8 @@ impl SenderTab {
 
         if sender_state.eq(&SenderState::Picked) {
             send_button = send_button.on_press(Message::Send);
+        } else if sender_state.eq(&SenderState::SendDone) {
+            send_button = send_button.on_press(Message::SendDone);
         } else if !self.send_button_text.is_empty() {
             send_button = send_button.on_press(Message::Cancel);
         }
@@ -271,15 +396,134 @@ impl SenderTab {
             row![]
         };
 
+        let notification = match &*SENDER_NOTIFICATION.read().unwrap() {
+            SenderNotification::Normal => row![],
+            SenderNotification::Message(msg) => {
+                row![text(msg).style(styles::text_styles::accent_color_theme())]
+            }
+            SenderNotification::Errored(err) => {
+                row![text(err).style(styles::text_styles::red_text_theme())]
+            }
+        };
+
         column![
             pick,
-            self.picked_body.view().map(Message::PickedBody),
+            self.progress_view(),
             send_button,
-            share_code
+            share_code,
+            notification,
         ]
         .padding(5)
         .spacing(5)
         .into()
+    }
+
+    fn progress_view(&self) -> Element<'_, Message> {
+        if self.paths.is_empty() {
+            let text = container(text("Pick File(s) or Folder(s) to send").font(Font {
+                weight: font::Weight::Bold,
+                ..Default::default()
+            }))
+            .center_x()
+            .center_y()
+            .style(styles::container_styles::first_class_container_rounded_theme())
+            .height(300)
+            .width(Length::Fill);
+            column!(text).width(Length::Fill).spacing(5).into()
+        } else {
+            let sender_state = SENDER_STATE.read().unwrap();
+            let picked_body_view: Element<'_, Message> = container(
+                scrollable(if sender_state.eq(&SenderState::Picked) {
+                    Column::with_children(
+                        self.paths
+                            .iter()
+                            .map(|path| {
+                                row![
+                                    text(&path).style(styles::text_styles::accent_color_theme()),
+                                    horizontal_space(),
+                                    remove_button(path.to_owned()),
+                                ]
+                                .align_items(iced::Alignment::Center)
+                                .into()
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .padding(10)
+                    .spacing(5)
+                    .width(Length::Fill)
+                } else {
+                    Column::from_vec(
+                        self.progress_bars
+                            .iter()
+                            .map(|pb| {
+                                column![
+                                    text(&pb.0).style(styles::text_styles::accent_color_theme()),
+                                    pb.1.view().map(Message::ProgressBar),
+                                ]
+                                .spacing(3)
+                                .into()
+                            })
+                            .collect(),
+                    )
+                    .padding(10)
+                    .spacing(5)
+                    .width(Length::Fill)
+                })
+                .id(self.scrollable_id.clone())
+                .on_scroll(Message::PageScrolled)
+                .height(300)
+                .direction(styles::scrollable_styles::vertical_direction()),
+            )
+            .style(styles::container_styles::first_class_container_rounded_theme())
+            .width(Length::Fill)
+            .into();
+
+            let details_text = if self.fc.is_some() {
+                let fc = self.fc.clone().unwrap();
+                if sender_state.eq(&SenderState::SendDone) {
+                    format!(
+                        "Sent {} files and {} folders ({})",
+                        fc.num_files,
+                        fc.num_folders,
+                        fc.total_size_to_human_readable()
+                    )
+                } else if sender_state.eq(&SenderState::Reject) {
+                    format!(
+                        "Rejected {} files and {} folders ({})",
+                        fc.num_files,
+                        fc.num_folders,
+                        fc.total_size_to_human_readable()
+                    )
+                } else if fc.num_folders > 0 {
+                    format!(
+                        "{} {} files and {} folders ({})",
+                        if self.start_send { "Sending" } else { "" },
+                        fc.num_files,
+                        fc.num_folders,
+                        fc.total_size_to_human_readable()
+                    )
+                } else {
+                    format!(
+                        "{} {} files ({})",
+                        if self.start_send { "Sending" } else { "" },
+                        fc.num_files,
+                        fc.total_size_to_human_readable()
+                    )
+                }
+            } else {
+                "".to_string()
+            };
+
+            column![
+                picked_body_view,
+                text(details_text).font(Font {
+                    weight: font::Weight::Bold,
+                    ..Default::default()
+                }),
+            ]
+            .spacing(5)
+            .into()
+        }
     }
 }
 
@@ -295,6 +539,18 @@ impl Tab for SenderTab {
     }
 
     fn get_scrollable_offset(&self) -> scrollable::RelativeOffset {
-        self.picked_body.get_scrollable_offset()
+        self.scrollable_offset
     }
+}
+
+fn remove_button(id: String) -> Element<'static, Message> {
+    let remove_icon_handle = svg::Handle::from_memory(REMOVE_ICON);
+    let remove_icon = svg(remove_icon_handle)
+        .style(styles::svg_styles::colored_svg_theme())
+        .width(Length::Shrink);
+
+    button(remove_icon)
+        .style(styles::button_styles::transparent_button_theme())
+        .on_press(Message::Remove(id))
+        .into()
 }
