@@ -180,7 +180,10 @@ impl TabsController {
     }
 
     pub fn subscription(&self) -> iced::Subscription<Message> {
-        iced::Subscription::batch([self.sender_tab.subscription().map(Message::Sender)])
+        iced::Subscription::batch([
+            self.sender_tab.subscription().map(Message::Sender),
+            self.receiver_tab.subscription().map(Message::Receiver),
+        ])
     }
 
     pub fn update(&mut self, message: Message) -> Command<Message> {

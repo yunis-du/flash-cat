@@ -1,8 +1,10 @@
 use flash_cat_common::utils::{human_bytes, human_duration};
 use iced::{
-    widget::{horizontal_space, progress_bar, row, text},
+    widget::{column, horizontal_space, progress_bar, row, text},
     Element,
 };
+
+use super::styles;
 
 #[derive(Clone, Debug)]
 pub enum Message {}
@@ -10,7 +12,7 @@ pub enum Message {}
 #[derive(Debug, Clone, PartialEq)]
 pub enum State {
     Idle,
-    Sending(f32),
+    Progress(f32),
     Skip,
     Finished,
 }
@@ -18,6 +20,7 @@ pub enum State {
 #[derive(Debug, Clone)]
 pub struct ProgressBar {
     file_id: u64,
+    file_name: String,
     file_size: u64,
     num_files: u64,
     pb: indicatif::ProgressBar,
@@ -26,10 +29,11 @@ pub struct ProgressBar {
 }
 
 impl ProgressBar {
-    pub fn new(file_id: u64, file_size: u64, num_files: u64) -> Self {
+    pub fn new(file_id: u64, file_name: String, file_size: u64, num_files: u64) -> Self {
         let pb = indicatif::ProgressBar::new(file_size);
         Self {
             file_id,
+            file_name,
             file_size,
             num_files,
             pb,
@@ -45,7 +49,7 @@ impl ProgressBar {
     pub fn start(&mut self) {
         match &self.state {
             State::Idle { .. } => {
-                self.state = State::Sending(0.0);
+                self.state = State::Progress(0.0);
             }
             _ => {}
         }
@@ -73,37 +77,48 @@ impl ProgressBar {
     pub fn view(&self) -> Element<Message> {
         let (current_progress, per_sec) = match &self.state {
             State::Idle => (0.0, 0),
-            State::Sending(progress) => (*progress, self.pb.per_sec() as u64),
+            State::Progress(progress) => (*progress, self.pb.per_sec() as u64),
             State::Skip => (0.0, 0),
             State::Finished => (self.file_size as f32, self.per_sec),
         };
 
         if self.state.eq(&State::Skip) {
-            text("Skip").into()
+            row![
+                text(self.file_name.as_str()).style(styles::text_styles::accent_color_theme()),
+                horizontal_space(),
+                text("Skip")
+            ]
+            .spacing(3)
+            .align_items(iced::Alignment::Center)
+            .into()
         } else {
             self.pb.set_position(current_progress as u64);
-            row![
-                progress_bar(0.0..=self.file_size as f32, current_progress)
-                    .height(12)
-                    .width(200),
-                horizontal_space(),
-                text(format!(
-                    "{}/{} ({}/s, {}) {}/{}",
-                    human_bytes(current_progress as u64),
-                    human_bytes(self.file_size as u64),
-                    human_bytes(per_sec),
-                    if current_progress == 0.0 {
-                        human_duration(std::time::Duration::ZERO)
-                    } else {
-                        human_duration(self.pb.eta())
-                    },
-                    self.file_id,
-                    self.num_files,
-                ))
-                .size(12)
+            column![
+                text(self.file_name.as_str()).style(styles::text_styles::accent_color_theme()),
+                row![
+                    progress_bar(0.0..=self.file_size as f32, current_progress)
+                        .height(12)
+                        .width(200),
+                    horizontal_space(),
+                    text(format!(
+                        "{}/{} ({}/s, {}) {}/{}",
+                        human_bytes(current_progress as u64),
+                        human_bytes(self.file_size as u64),
+                        human_bytes(per_sec),
+                        if current_progress == 0.0 {
+                            human_duration(std::time::Duration::ZERO)
+                        } else {
+                            human_duration(self.pb.eta())
+                        },
+                        self.file_id,
+                        self.num_files,
+                    ))
+                    .size(12)
+                ]
+                .spacing(5)
+                .align_items(iced::Alignment::Center)
             ]
-            .spacing(5)
-            .align_items(iced::Alignment::Center)
+            .spacing(3)
             .into()
         }
     }

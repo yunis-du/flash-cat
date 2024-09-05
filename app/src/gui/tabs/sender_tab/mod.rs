@@ -93,7 +93,7 @@ pub struct SenderTab {
     paths: Vec<String>,
     fc: Option<FileCollector>,
     fcs: Option<Arc<FlashCatSender>>,
-    progress_bars: Vec<(String, ProgressBar)>,
+    progress_bars: Vec<ProgressBar>,
     start_send: bool,
 }
 
@@ -119,7 +119,7 @@ impl SenderTab {
         let mut batch = self
             .progress_bars
             .iter()
-            .map(|(_, progress_bar)| progress_bar.subscription().map(Message::ProgressBar))
+            .map(|progress_bar| progress_bar.subscription().map(Message::ProgressBar))
             .collect::<Vec<_>>();
 
         batch.push(if self.start_send {
@@ -163,9 +163,11 @@ impl SenderTab {
                         let fc = collect_files(self.paths.as_slice());
                         self.progress_bars.clear();
                         fc.files.iter().for_each(|f| {
-                            self.progress_bars.push((
+                            self.progress_bars.push(ProgressBar::new(
+                                f.file_id,
                                 f.name.to_owned(),
-                                ProgressBar::new(f.file_id, f.size, fc.num_files),
+                                f.size,
+                                fc.num_files,
                             ))
                         });
                         self.fc.replace(fc);
@@ -202,7 +204,9 @@ impl SenderTab {
                         Ok(fcs) => {
                             let fcs = Arc::new(fcs);
                             self.fcs.replace(fcs.clone());
-                            self.progress_bars.iter_mut().for_each(|(_, p)| p.start());
+                            self.progress_bars
+                                .iter_mut()
+                                .for_each(|progress_bar| progress_bar.start());
                             self.start_send = true;
                         }
                         Err(_) => {
@@ -217,9 +221,11 @@ impl SenderTab {
                 let fc = collect_files(self.paths.as_slice());
                 self.progress_bars.clear();
                 fc.files.iter().for_each(|f| {
-                    self.progress_bars.push((
+                    self.progress_bars.push(ProgressBar::new(
+                        f.file_id,
                         f.name.to_owned(),
-                        ProgressBar::new(f.file_id, f.size, fc.num_files),
+                        f.size,
+                        fc.num_files,
                     ))
                 });
                 self.fc.replace(fc);
@@ -283,7 +289,7 @@ impl SenderTab {
                         if !SENDER_STATE.read().unwrap().eq(&SenderState::Sending) {
                             *SENDER_STATE.write().unwrap() = SenderState::Sending;
                         }
-                        Some(ProgressBarState::Sending(sent))
+                        Some(ProgressBarState::Progress(sent))
                     }
                     sender::Progress::Finished => Some(ProgressBarState::Finished),
                     sender::Progress::Skip => Some(ProgressBarState::Skip),
@@ -292,9 +298,9 @@ impl SenderTab {
                 let progress_bar = self
                     .progress_bars
                     .iter_mut()
-                    .find(|(_, p)| p.get_id().eq(&file_id));
+                    .find(|progress_bar| progress_bar.get_id().eq(&file_id));
                 if let Some(progress_bar) = progress_bar {
-                    progress_bar.1.update_state(new_state);
+                    progress_bar.update_state(new_state);
                 }
             }
         }
@@ -455,14 +461,7 @@ impl SenderTab {
                     Column::from_vec(
                         self.progress_bars
                             .iter()
-                            .map(|pb| {
-                                column![
-                                    text(&pb.0).style(styles::text_styles::accent_color_theme()),
-                                    pb.1.view().map(Message::ProgressBar),
-                                ]
-                                .spacing(3)
-                                .into()
-                            })
+                            .map(|progress_bar| progress_bar.view().map(Message::ProgressBar))
                             .collect(),
                     )
                     .padding(10)
