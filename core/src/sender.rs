@@ -28,9 +28,9 @@ use crate::{Progress, RelayType, SenderInteractionMessage, PING_INTERVAL};
 pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Sender stream
-pub type SenderStream = Pin<Box<dyn Stream<Item = SenderInteractionMessage> + Send>>;
+pub type SenderStream = Pin<Box<dyn Stream<Item=SenderInteractionMessage> + Send>>;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct FlashCatSender {
     zip_files: Vec<String>,
     encryptor: Arc<Encryptor>,
@@ -69,6 +69,24 @@ impl FlashCatSender {
         })
     }
 
+    pub fn new_with_file_collector(
+        share_code: String,
+        specify_relay: Option<String>,
+        file_collector: FileCollector,
+    ) -> Result<Self> {
+        let shutdown = Shutdown::new();
+        let encryptor = Arc::new(Encryptor::new(share_code)?);
+        Ok(Self {
+            zip_files: vec![],
+            encryptor,
+            specify_relay,
+            file_collector: Arc::new(file_collector),
+            local_relay_shutdown: Shutdown::new(),
+            public_relay_shutdown: Shutdown::new(),
+            shutdown,
+        })
+    }
+
     pub async fn start(self: Arc<Self>) -> Result<SenderStream> {
         let (sender_stream_tx, mut sender_stream_rx) = mpsc::channel(1024);
 
@@ -88,7 +106,7 @@ impl FlashCatSender {
                 sender_stream_tx.clone(),
                 self.shutdown.clone(),
             )
-            .await;
+                .await;
         } else {
             // start local relay
             let local_relay_port = find_available_port(DEFAULT_RELAY_PORT);
@@ -97,7 +115,7 @@ impl FlashCatSender {
                 sender_stream_tx.clone(),
                 self.local_relay_shutdown.clone(),
             )
-            .await;
+                .await;
 
             // waite for local relay start
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -110,7 +128,7 @@ impl FlashCatSender {
                 sender_stream_tx.clone(),
                 self.local_relay_shutdown.clone(),
             )
-            .await;
+                .await;
 
             // connect public relay
             let endpoint = Endpoint::from_shared(format!("https://{PUBLIC_RELAY}"))?;
@@ -120,7 +138,7 @@ impl FlashCatSender {
                 sender_stream_tx.clone(),
                 self.public_relay_shutdown.clone(),
             )
-            .await;
+                .await;
 
             // broadcast
             self.broadcast_relay_addr(local_relay_port, sender_stream_tx.clone())
@@ -195,13 +213,13 @@ impl FlashCatSender {
                 &sender_stream_tx,
                 shutdown,
             )
-            .await
+                .await
             {
                 let _ = Self::send_msg_to_stream(
                     &sender_stream_tx,
                     SenderInteractionMessage::RelayFailed((relay_type, e.to_string())),
                 )
-                .await;
+                    .await;
             }
         });
     }
@@ -224,7 +242,7 @@ impl FlashCatSender {
         tx.send(RelayUpdate {
             relay_message: Some(join),
         })
-        .await?;
+            .await?;
 
         let resp = client.channel(ReceiverStream::new(rx)).await?;
         let mut messages = resp.into_inner(); // A stream of relay messages.
@@ -257,7 +275,7 @@ impl FlashCatSender {
                         sender_stream_tx,
                         SenderInteractionMessage::Message("Invalid join message".to_string()),
                     )
-                    .await?;
+                        .await?;
                 }
                 RelayMessage::Joined(_) => (),
                 RelayMessage::Ready(_) => {
@@ -272,14 +290,14 @@ impl FlashCatSender {
                             })),
                         }),
                     )
-                    .await?;
+                        .await?;
                 }
                 RelayMessage::Sender(_) => {
                     Self::send_msg_to_stream(
                         sender_stream_tx,
                         SenderInteractionMessage::Message("Invalid sender message".to_string()),
                     )
-                    .await?;
+                        .await?;
                 }
                 RelayMessage::Receiver(receiver) => {
                     if let Some(receiver_message) = receiver.receiver_message {
@@ -302,7 +320,7 @@ impl FlashCatSender {
                                                     notify_rx,
                                                     &sender_stream_tx,
                                                 )
-                                                .await
+                                                    .await
                                                 {
                                                     let _ = Self::send_msg_to_stream(
                                                         &sender_stream_tx,
@@ -311,7 +329,7 @@ impl FlashCatSender {
                                                             err.to_string()
                                                         )),
                                                     )
-                                                    .await;
+                                                        .await;
                                                 }
                                             });
                                         }
@@ -320,12 +338,12 @@ impl FlashCatSender {
                                                 &tx,
                                                 RelayMessage::Done(Done {}),
                                             )
-                                            .await?;
+                                                .await?;
                                             Self::send_msg_to_stream(
                                                 sender_stream_tx,
                                                 SenderInteractionMessage::ReceiverReject,
                                             )
-                                            .await?;
+                                                .await?;
                                         }
                                     }
                                 } else {
@@ -335,7 +353,7 @@ impl FlashCatSender {
                                             "try_from confirm failed".to_string(),
                                         ),
                                     )
-                                    .await?;
+                                        .await?;
                                 }
                             }
                             ReceiverMessage::NewFileConfirm(new_file_confirm) => {
@@ -353,14 +371,14 @@ impl FlashCatSender {
                         sender_stream_tx,
                         SenderInteractionMessage::Error(format!("relay error {}", e.to_string())),
                     )
-                    .await?;
+                        .await?;
                 }
                 RelayMessage::Terminated(_) => {
                     Self::send_msg_to_stream(
                         sender_stream_tx,
                         SenderInteractionMessage::OtherClose,
                     )
-                    .await?;
+                        .await?;
                 }
                 RelayMessage::Ping(_) => (),
                 RelayMessage::Pong(_) => (),
@@ -388,7 +406,7 @@ impl FlashCatSender {
                     })),
                 }),
             )
-            .await?;
+                .await?;
 
             let file_confirm = notify.recv().await?;
 
@@ -397,7 +415,7 @@ impl FlashCatSender {
                     sender_stream_tx,
                     SenderInteractionMessage::ContinueFile(file_confirm.file_id),
                 )
-                .await?;
+                    .await?;
                 continue;
             }
 
@@ -406,7 +424,7 @@ impl FlashCatSender {
                     sender_stream_tx,
                     SenderInteractionMessage::Error("File order is wrong".to_string()),
                 )
-                .await?;
+                    .await?;
                 continue;
             }
 
@@ -427,12 +445,12 @@ impl FlashCatSender {
                             })),
                         }),
                     )
-                    .await?;
+                        .await?;
                     Self::send_msg_to_stream(
                         sender_stream_tx,
                         SenderInteractionMessage::FileProgressFinish(send_file.file_id),
                     )
-                    .await?;
+                        .await?;
                     break;
                 }
                 Self::send_msg_to_relay(
@@ -444,7 +462,7 @@ impl FlashCatSender {
                         })),
                     }),
                 )
-                .await?;
+                    .await?;
                 position += read_length as u64;
                 Self::send_msg_to_stream(
                     sender_stream_tx,
@@ -453,7 +471,7 @@ impl FlashCatSender {
                         position,
                     }),
                 )
-                .await?;
+                    .await?;
             }
         }
         Self::send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
