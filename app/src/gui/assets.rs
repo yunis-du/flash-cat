@@ -32,4 +32,5 @@ pub mod fonts {
 
 pub mod logos {
     pub static IMG_LOGO: &[u8] = include_bytes!("../../assets/logos/flash-cat.png");
+    pub static ICON_LOGO: &[u8] = include_bytes!("../../assets/logos/icons/icon.ico");
 }

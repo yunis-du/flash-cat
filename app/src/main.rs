@@ -5,7 +5,7 @@ use flash_cat_app::gui::{assets, FlashCatApp};
 use iced::{window, Application, Font, Settings, Size};
 
 fn main() -> Result<()> {
-    let icon = window::icon::from_file_data(assets::logos::IMG_LOGO, None).ok();
+    let icon = window::icon::from_file_data(assets::logos::ICON_LOGO, None).ok();
 
     FlashCatApp::run(Settings {
         window: iced::window::Settings {
