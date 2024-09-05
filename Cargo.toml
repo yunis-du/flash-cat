@@ -9,13 +9,14 @@ members = [
 ]
 
 [workspace.package]
-authors = ["Yunis Du"]
+authors = ["Yunis Du <yunis@88.com>"]
+license = "MIT"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/yunis-du/flash-cat"
+rust-version = "1.80"
 
 [workspace.dependencies]
-flash_cat_app = { version = "0.1.0", path = "app" }
-flash_cat_cli = { version = "0.1.0", path = "cli" }
 flash_cat_common = { version = "0.1.0", path = "common" }
 flash_cat_core = { version = "0.1.0", path = "core" }
 flash_cat_relay = { version = "0.1.0", path = "relay" }

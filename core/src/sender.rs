@@ -17,7 +17,7 @@ use flash_cat_common::{
     Shutdown,
 };
 use flash_cat_relay::run_relay;
-use std::{net::SocketAddr, path::Path, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::Path, pin::Pin, sync::Arc, time::Duration};
 use tokio::{fs::File, io::AsyncReadExt, sync::mpsc, time::MissedTickBehavior};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tonic::transport::Endpoint;
@@ -27,7 +27,10 @@ use crate::{Progress, RelayType, SenderInteractionMessage, PING_INTERVAL};
 /// Broadcast local relay addr timeout.
 pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
 
-#[derive(Clone)]
+/// Sender stream
+pub type SenderStream = Pin<Box<dyn Stream<Item = SenderInteractionMessage> + Send>>;
+
+#[derive(Debug, Clone)]
 pub struct FlashCatSender {
     zip_files: Vec<String>,
     encryptor: Arc<Encryptor>,
@@ -66,9 +69,25 @@ impl FlashCatSender {
         })
     }
 
-    pub async fn start(
-        &self,
-    ) -> Result<(impl Stream<Item = SenderInteractionMessage> + Send + '_)> {
+    pub fn new_with_file_collector(
+        share_code: String,
+        specify_relay: Option<String>,
+        file_collector: FileCollector,
+    ) -> Result<Self> {
+        let shutdown = Shutdown::new();
+        let encryptor = Arc::new(Encryptor::new(share_code)?);
+        Ok(Self {
+            zip_files: vec![],
+            encryptor,
+            specify_relay,
+            file_collector: Arc::new(file_collector),
+            local_relay_shutdown: Shutdown::new(),
+            public_relay_shutdown: Shutdown::new(),
+            shutdown,
+        })
+    }
+
+    pub async fn start(self: Arc<Self>) -> Result<SenderStream> {
         let (sender_stream_tx, mut sender_stream_rx) = mpsc::channel(1024);
 
         if self.specify_relay.is_some() {
@@ -127,7 +146,7 @@ impl FlashCatSender {
         }
         // resolve shutdown when sender_stream_rx is no message will cause panic
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
-        Ok(async_stream::stream! {
+        Ok(Box::pin(async_stream::stream! {
             while !self.shutdown.is_terminated() {
                 tokio::select! {
                     Some(sender_stream) = sender_stream_rx.recv() => {
@@ -136,7 +155,7 @@ impl FlashCatSender {
                     _ = interval.tick() =>(),
                 }
             }
-        })
+        }))
     }
 
     async fn start_loacl_relay(
@@ -258,7 +277,7 @@ impl FlashCatSender {
                     )
                     .await?;
                 }
-                RelayMessage::Joined(_) =>(),
+                RelayMessage::Joined(_) => (),
                 RelayMessage::Ready(_) => {
                     Self::send_msg_to_relay(
                         &tx,
