@@ -1,13 +1,15 @@
 use anyhow::{Context, Result};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    os::unix::fs::PermissionsExt,
     path::Path,
     pin::Pin,
     sync::{Arc, LazyLock, RwLock},
     time::Duration,
 };
+
 use tokio::{fs, io::AsyncWriteExt, sync::mpsc, time::MissedTickBehavior};
 use tokio_stream::{wrappers::ReceiverStream as TokioReceiverStream, Stream, StreamExt};
 use tonic::transport::Endpoint;
@@ -297,30 +299,35 @@ impl FlashCatReceiver {
                                 .await?;
 
                                 if absolute_path.exists() {
-                                    let file = {
+                                    let recv_file = {
                                         #[cfg(unix)]
                                         {
-                                            let file = fs::File::options()
-                                                .write(true)
-                                                .read(true)
-                                                .open(&absolute_path)
+                                            RecvFile::new({
+                                                let file = fs::File::options()
+                                                    .write(true)
+                                                    .read(true)
+                                                    .open(&absolute_path)
+                                                    .await?;
+                                                file.set_permissions(
+                                                    std::fs::Permissions::from_mode(
+                                                        new_file_req.file_mode,
+                                                    ),
+                                                )
                                                 .await?;
-                                            file.set_permissions(std::fs::Permissions::from_mode(
-                                                new_file_req.file_mode,
-                                            ))
-                                            .await?;
-                                            file
+                                                file
+                                            })
                                         }
                                         #[cfg(windows)]
                                         {
-                                            fs::File::options()
-                                                .write(true)
-                                                .read(true)
-                                                .open(&absolute_path)
-                                                .await?
+                                            RecvFile::new(
+                                                fs::File::options()
+                                                    .write(true)
+                                                    .read(true)
+                                                    .open(&absolute_path)
+                                                    .await?,
+                                            )
                                         }
                                     };
-                                    let recv_file = RecvFile::new(file);
                                     recv_files.insert(new_file_req.file_id, recv_file);
 
                                     Self::send_msg_to_stream(
