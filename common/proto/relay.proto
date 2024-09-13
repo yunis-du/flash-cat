@@ -71,9 +71,10 @@ message SendRequest {
 message NewFileRequest {
   uint64 file_id = 1;
   string filename = 2;
-  string relative_path = 3;
-  uint64 total_size = 4;
-  bool is_empty_dir = 5;
+  uint32 file_mode = 3;
+  string relative_path = 4;
+  uint64 total_size = 5;
+  bool is_empty_dir = 6;
 }
 
 message FileData {

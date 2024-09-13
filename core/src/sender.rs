@@ -400,6 +400,10 @@ impl FlashCatSender {
                     sender_message: Some(SenderMessage::NewFileRequest(NewFileRequest {
                         file_id: send_file.file_id,
                         filename: send_file.name.clone(),
+                        #[cfg(unix)]
+                        file_mode: send_file.mode,
+                        #[cfg(windows)]
+                        file_mode: 0,
                         relative_path: send_file.relative_path.clone(),
                         total_size: send_file.size,
                         is_empty_dir: send_file.empty_dir,
