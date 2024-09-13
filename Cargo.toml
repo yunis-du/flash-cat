@@ -24,6 +24,7 @@ flash_cat_relay = { version = "0.1.0", path = "relay" }
 anyhow = "1.0.80"
 async-channel = "2.2.0"
 async-stream = "0.3.5"
+built = { version = "0.7.4", features = ["chrono", "git2"] }
 bytes = { version = "1.5.0", features = ["serde"] }
 clap = { version = "4.5.1", features = ["derive", "env"] }
 chrono = "0.4.35"

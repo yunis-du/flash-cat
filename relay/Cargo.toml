@@ -1,8 +1,11 @@
 [package]
 name = "flash_cat_relay"
 authors.workspace = true
+license.workspace = true
 version.workspace = true
 edition.workspace = true
+repository.workspace = true
+rust-version.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -27,3 +30,6 @@ serde.workspace = true
 tonic-reflection = "0.11.0"
 tower = { version = "0.4.13", features = ["steer"] }
 tower-http = { version = "0.5.2", features = ["fs", "redirect", "trace"] }
+
+[build-dependencies]
+built.workspace = true

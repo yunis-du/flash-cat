@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use flash_cat_common::{init_logger, VersionInfo, RELAY_VERSION};
-use flash_cat_relay::relay::Relay;
+use flash_cat_relay::{built_info, relay::Relay};
 use log::{error, info};
 use std::net::{IpAddr, SocketAddr};
 #[cfg(unix)]
@@ -40,6 +40,8 @@ struct Cmd {
 const VERSION_INFO: &'static VersionInfo = &VersionInfo {
     name: "Flash-Cat-Relay",
     version: RELAY_VERSION,
+    commit_hash: built_info::GIT_COMMIT_HASH,
+    build_time: built_info::BUILT_TIME_UTC,
 };
 
 #[tokio::main]

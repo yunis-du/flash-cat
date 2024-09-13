@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
-use flash_cat_cli::{receive::Receive, send::Send};
+use flash_cat_cli::{built_info, receive::Receive, send::Send};
 use flash_cat_common::{utils::fs::is_file, VersionInfo, CLI_VERSION};
 #[cfg(windows)]
 use tokio::signal::ctrl_c;
@@ -65,6 +65,8 @@ struct RecvCmd {
 const VERSION_INFO: &'static VersionInfo = &VersionInfo {
     name: "Flash-Cat-CLI",
     version: CLI_VERSION,
+    commit_hash: built_info::GIT_COMMIT_HASH,
+    build_time: built_info::BUILT_TIME_UTC,
 };
 
 #[tokio::main]

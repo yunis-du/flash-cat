@@ -1,8 +1,10 @@
 [package]
 name = "flash_cat_cli"
 authors.workspace = true
+license.workspace = true
 version.workspace = true
 edition.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -22,3 +24,6 @@ dashmap.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 indicatif.workspace = true
+
+[build-dependencies]
+built.workspace = true

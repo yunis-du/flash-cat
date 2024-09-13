@@ -7,6 +7,10 @@ pub mod listen;
 pub mod relay;
 pub mod session;
 
+pub mod built_info {
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
+
 pub async fn run_relay(addr: SocketAddr, signal: impl Future<Output = ()>) -> Result<()> {
     let relay = relay::Relay::new()?;
 
