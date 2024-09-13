@@ -76,18 +76,17 @@ fn info_widget() -> Element<'static, Message> {
 
     grid = grid.push(GridRow::new().push(text("Repository")).push(repository));
 
-    if built_info::GIT_DIRTY.unwrap_or(false) {
-        if let Some(commit_hash) = built_info::GIT_COMMIT_HASH {
-            grid = grid.push(
-                GridRow::new()
-                    .push(text("Commit Hash"))
-                    .push(text(commit_hash)),
-            );
-        }
+    if let Some(commit_hash) = built_info::GIT_COMMIT_HASH {
+        grid = grid.push(
+            GridRow::new()
+                .push(text("Commit Hash"))
+                .push(text(commit_hash)),
+        );
     }
+    
     grid = grid.push(
         GridRow::new()
-            .push(text("Build Time"))
+            .push(text("Build Time                  "))
             .push(text(built_info::BUILT_TIME_UTC)),
     );
 
