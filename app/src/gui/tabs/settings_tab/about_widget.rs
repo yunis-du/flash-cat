@@ -1,6 +1,7 @@
 use crate::gui::assets::icons::GITHUB_ICON;
 use crate::gui::styles;
 
+use flash_cat_common::APP_VERSION;
 use iced::widget::{button, column, container, mouse_area, row, svg, text};
 use iced::{mouse, Command, Element, Length};
 use iced_aw::{Grid, GridRow};
@@ -57,6 +58,12 @@ fn info_widget() -> Element<'static, Message> {
 
     grid = grid.push(
         GridRow::new()
+            .push(text("Version"))
+            .push(text(APP_VERSION)),
+    );
+
+    grid = grid.push(
+        GridRow::new()
             .push(text("License"))
             .push(text(built_info::PKG_LICENSE)),
     );
@@ -69,7 +76,7 @@ fn info_widget() -> Element<'static, Message> {
 
     grid = grid.push(GridRow::new().push(text("Repository")).push(repository));
 
-    if !built_info::GIT_DIRTY.unwrap_or(false) {
+    if built_info::GIT_DIRTY.unwrap_or(false) {
         if let Some(commit_hash) = built_info::GIT_COMMIT_HASH {
             grid = grid.push(
                 GridRow::new()
@@ -82,11 +89,6 @@ fn info_widget() -> Element<'static, Message> {
         GridRow::new()
             .push(text("Build Time"))
             .push(text(built_info::BUILT_TIME_UTC)),
-    );
-    grid = grid.push(
-        GridRow::new()
-            .push(text("Rust Version    "))
-            .push(text(built_info::RUSTC_VERSION)),
     );
 
     grid.into()
