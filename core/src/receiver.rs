@@ -297,24 +297,30 @@ impl FlashCatReceiver {
                                 .await?;
 
                                 if absolute_path.exists() {
-                                    let recv_file = RecvFile::new(if cfg!(target_os = "windows") {
-                                        fs::File::options()
-                                            .write(true)
-                                            .read(true)
-                                            .open(&absolute_path)
-                                            .await?
-                                    } else {
-                                        let file = fs::File::options()
-                                            .write(true)
-                                            .read(true)
-                                            .open(&absolute_path)
+                                    let file = {
+                                        #[cfg(unix)]
+                                        {
+                                            let file = fs::File::options()
+                                                .write(true)
+                                                .read(true)
+                                                .open(&absolute_path)
+                                                .await?;
+                                            file.set_permissions(std::fs::Permissions::from_mode(
+                                                new_file_req.file_mode,
+                                            ))
                                             .await?;
-                                        file.set_permissions(std::fs::Permissions::from_mode(
-                                            new_file_req.file_mode,
-                                        ))
-                                        .await?;
-                                        file
-                                    });
+                                            file
+                                        }
+                                        #[cfg(windows)]
+                                        {
+                                            fs::File::options()
+                                                .write(true)
+                                                .read(true)
+                                                .open(&absolute_path)
+                                                .await?
+                                        }
+                                    };
+                                    let recv_file = RecvFile::new(file);
                                     recv_files.insert(new_file_req.file_id, recv_file);
 
                                     Self::send_msg_to_stream(
@@ -334,16 +340,25 @@ impl FlashCatReceiver {
                                     if !parent.exists() && !parent.to_string_lossy().is_empty() {
                                         fs::create_dir_all(parent).await?;
                                     }
-                                    let recv_file = RecvFile::new(if cfg!(target_os = "windows") {
-                                        fs::File::create(&absolute_path).await?
-                                    } else {
-                                        let file = fs::File::create(&absolute_path).await?;
-                                        file.set_permissions(std::fs::Permissions::from_mode(
-                                            new_file_req.file_mode,
-                                        ))
-                                        .await?;
-                                        file
-                                    });
+                                    let recv_file = {
+                                        #[cfg(unix)]
+                                        {
+                                            RecvFile::new({
+                                                let file = fs::File::create(&absolute_path).await?;
+                                                file.set_permissions(
+                                                    std::fs::Permissions::from_mode(
+                                                        new_file_req.file_mode,
+                                                    ),
+                                                )
+                                                .await?;
+                                                file
+                                            })
+                                        }
+                                        #[cfg(windows)]
+                                        {
+                                            RecvFile::new(fs::File::create(&absolute_path).await?)
+                                        }
+                                    };
                                     recv_files.insert(new_file_req.file_id, recv_file);
                                 }
 
