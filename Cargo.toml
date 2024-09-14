@@ -11,15 +11,15 @@ members = [
 [workspace.package]
 authors = ["Yunis Du <yunis@88.com>"]
 license = "MIT"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 repository = "https://github.com/yunis-du/flash-cat"
 rust-version = "1.80"
 
 [workspace.dependencies]
-flash_cat_common = { version = "0.1.0", path = "common" }
-flash_cat_core = { version = "0.1.0", path = "core" }
-flash_cat_relay = { version = "0.1.0", path = "relay" }
+flash_cat_common = { version = "1.0.0", path = "common" }
+flash_cat_core = { version = "1.0.0", path = "core" }
+flash_cat_relay = { version = "1.0.0", path = "relay" }
 
 anyhow = "1.0.80"
 async-channel = "2.2.0"

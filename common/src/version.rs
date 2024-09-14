@@ -1,7 +1,7 @@
 use std::fmt;
 
-pub const APP_VERSION: &'static str = "0.1.2";
-pub const CLI_VERSION: &'static str = "0.1.5";
+pub const APP_VERSION: &'static str = "1.0.0";
+pub const CLI_VERSION: &'static str = "1.0.0";
 pub const RELAY_VERSION: &'static str = "1.0.0";
 
 pub struct VersionInfo {
@@ -15,10 +15,10 @@ impl fmt::Display for VersionInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Name:        {}
-Version:     {}
-Commit Hash: {}
-Build Time:  {}",
+            "    Name:        {}
+    Version:     {}
+    Commit Hash: {}
+    Build Time:  {}",
             self.name,
             self.version,
             self.commit_hash.unwrap_or("None"),
