@@ -84,17 +84,17 @@ impl ProgressBar {
 
         if self.state.eq(&State::Skip) {
             row![
-                text(self.file_name.as_str()).style(styles::text_styles::accent_color_theme()),
+                text(self.file_name.as_str()).style(styles::text_styles::accent_color_theme),
                 horizontal_space(),
                 text("Skip")
             ]
             .spacing(3)
-            .align_items(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
             .into()
         } else {
             self.pb.set_position(current_progress as u64);
             column![
-                text(self.file_name.as_str()).style(styles::text_styles::accent_color_theme()),
+                text(self.file_name.as_str()).style(styles::text_styles::accent_color_theme),
                 row![
                     progress_bar(0.0..=self.file_size as f32, current_progress)
                         .height(12)
@@ -116,7 +116,7 @@ impl ProgressBar {
                     .size(12)
                 ]
                 .spacing(5)
-                .align_items(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center)
             ]
             .spacing(3)
             .into()

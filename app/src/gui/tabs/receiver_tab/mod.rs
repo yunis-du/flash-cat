@@ -8,7 +8,7 @@ use flash_cat_core::{receiver::FlashCatReceiver, ReceiverConfirm};
 use iced::{
     font,
     widget::{button, column, container, horizontal_space, row, scrollable, text, text_input},
-    Command, Element, Font, Length,
+    Element, Font, Length, Task,
 };
 use iced::{
     widget::{
@@ -17,7 +17,7 @@ use iced::{
     },
     Alignment,
 };
-use receiver::{recv, RECV_NUM_FILES};
+use receiver::{recv, Error, Progress, RECV_NUM_FILES};
 
 use super::{settings_tab::settings_config::SETTINGS, Tab};
 use crate::gui::{
@@ -62,7 +62,7 @@ pub enum Message {
     ShareCodeChanged(String),
     Receive,
     ProgressBar(ProgressBarMessage),
-    ReceiveProgressed((u64, receiver::Progress)),
+    ReceiveProgressed(Result<(u64, Progress), Error>),
     Confirm(ConfirmType, bool),
     ConfirmResult,
     RecvDone,
@@ -77,7 +77,7 @@ pub struct ReceiverTab {
 }
 
 impl ReceiverTab {
-    pub fn new() -> (Self, Command<Message>) {
+    pub fn new() -> (Self, Task<Message>) {
         (
             Self {
                 scrollable_offset: RelativeOffset::START,
@@ -86,7 +86,7 @@ impl ReceiverTab {
                 fcr: None,
                 progress_bars: vec![],
             },
-            Command::none(),
+            Task::none(),
         )
     }
 
@@ -111,7 +111,7 @@ impl ReceiverTab {
         iced::Subscription::batch(batch)
     }
 
-    pub fn update(&mut self, message: Message) -> Command<Message> {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::PageScrolled(view_port) => {
                 self.scrollable_offset = view_port.relative_offset();
@@ -152,38 +152,52 @@ impl ReceiverTab {
                 }
             }
             Message::ProgressBar(_) => {}
-            Message::ReceiveProgressed((file_id, progress)) => {
-                if let receiver::Progress::New(file_id, file_name, file_size) = progress.clone() {
-                    self.progress_bars.push(ProgressBar::new(
-                        file_id,
-                        file_name.to_owned(),
-                        file_size,
-                        RECV_NUM_FILES.load(Ordering::Relaxed),
-                    ))
-                } else {
-                    let new_state = match progress {
-                        receiver::Progress::Received(recv) => {
-                            Some(ProgressBarState::Progress(recv))
+            Message::ReceiveProgressed(progress) => match progress {
+                Ok((file_id, progress)) => {
+                    if let receiver::Progress::New(file_id, file_name, file_size) = progress.clone()
+                    {
+                        self.progress_bars.push(ProgressBar::new(
+                            file_id,
+                            file_name.to_owned(),
+                            file_size,
+                            RECV_NUM_FILES.load(Ordering::Relaxed),
+                        ))
+                    } else {
+                        let new_state = match progress {
+                            receiver::Progress::Received(recv) => {
+                                Some(ProgressBarState::Progress(recv))
+                            }
+                            receiver::Progress::Finished => Some(ProgressBarState::Finished),
+                            receiver::Progress::Skip => Some(ProgressBarState::Skip),
+                            _ => None,
+                        };
+                        let progress_bar = self
+                            .progress_bars
+                            .iter_mut()
+                            .find(|progress_bar| progress_bar.get_id().eq(&file_id));
+                        if let Some(progress_bar) = progress_bar {
+                            progress_bar.update_state(new_state);
                         }
-                        receiver::Progress::Finished => Some(ProgressBarState::Finished),
-                        receiver::Progress::Skip => Some(ProgressBarState::Skip),
-                        _ => None,
-                    };
-                    let progress_bar = self
-                        .progress_bars
-                        .iter_mut()
-                        .find(|progress_bar| progress_bar.get_id().eq(&file_id));
-                    if let Some(progress_bar) = progress_bar {
-                        progress_bar.update_state(new_state);
                     }
                 }
-            }
+                Err(e) => match e {
+                    Error::ShareCodeNotFound => {
+                        *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Errored(
+                            "Not found, Please check share code.".to_string(),
+                        )
+                    }
+                    Error::OtherErroe(err_msg) => {
+                        *RECEIVER_NOTIFICATION.write().unwrap() =
+                            ReceiverNotification::Errored(err_msg)
+                    }
+                },
+            },
             Message::Confirm(confirm_type, confirm) => {
                 if self.fcr.is_some() {
                     let fcr = self.fcr.clone().unwrap();
                     match confirm_type {
                         ConfirmType::Receive => {
-                            return Command::perform(
+                            return Task::perform(
                                 async move {
                                     fcr.send_confirm(ReceiverConfirm::ReceiveConfirm(confirm))
                                         .await
@@ -208,7 +222,7 @@ impl ReceiverTab {
                                     progress_bar.update_state(Some(ProgressBarState::Skip));
                                 }
                             }
-                            return Command::perform(
+                            return Task::perform(
                                 async move {
                                     fcr.send_confirm(ReceiverConfirm::FileConfirm((
                                         confirm, file_id,
@@ -248,7 +262,7 @@ impl ReceiverTab {
                 *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Normal;
             }
         }
-        Command::none()
+        Task::none()
     }
 
     pub fn view(&self) -> Element<Message> {
@@ -261,7 +275,7 @@ impl ReceiverTab {
         ]
         .spacing(5)
         .padding(5)
-        .align_items(iced::Alignment::Center);
+        .align_y(iced::Alignment::Center);
 
         let receiver_state_read = RECEIVER_STATE.read().unwrap();
 
@@ -291,31 +305,33 @@ impl ReceiverTab {
             recv_button = recv_button.on_press(Message::RecvDone);
         }
 
-        let notification = match &*RECEIVER_NOTIFICATION.read().unwrap() {
+
+        let receiver_notification = RECEIVER_NOTIFICATION.read().unwrap();
+        let notification = match receiver_notification.clone() {
             ReceiverNotification::Normal => row![],
             ReceiverNotification::Message(msg) => {
-                row![text(msg).style(styles::text_styles::accent_color_theme())]
+                row![text(msg).style(styles::text_styles::accent_color_theme)]
             }
             ReceiverNotification::Errored(err) => {
-                row![text(err).style(styles::text_styles::red_text_theme())]
+                row![text(err).style(styles::text_styles::red_text_theme)]
             }
             ReceiverNotification::Confirm(confirm_type, confirm_msg) => row![
-                text(confirm_msg)
-                    .style(styles::text_styles::accent_color_theme())
+                text(confirm_msg.clone())
+                    .style(styles::text_styles::accent_color_theme)
                     .width(Length::Fixed(390.0)),
                 horizontal_space(),
                 button("Yes").on_press(Message::Confirm(confirm_type.clone(), true)),
                 button("No").on_press(Message::Confirm(confirm_type.clone(), false)),
             ]
             .spacing(5)
-            .align_items(Alignment::Center),
+            .align_y(Alignment::Center),
         };
 
         column![
             share_code_input,
             self.progress_view(),
             recv_button,
-            notification
+            notification,
         ]
         .padding(5)
         .spacing(5)
@@ -341,7 +357,7 @@ impl ReceiverTab {
                 .height(300)
                 .direction(styles::scrollable_styles::vertical_direction())
             )
-            .style(styles::container_styles::first_class_container_rounded_theme())
+            .style(styles::container_styles::first_class_container_rounded_theme)
             .height(300)
             .width(Length::Fill))
             .width(Length::Fill)
@@ -361,9 +377,9 @@ impl ReceiverTab {
                     ..Default::default()
                 })
             )
-            .center_x()
-            .center_y()
-            .style(styles::container_styles::first_class_container_rounded_theme())
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(styles::container_styles::first_class_container_rounded_theme)
             .height(300)
             .width(Length::Fill))
             .width(Length::Fill)

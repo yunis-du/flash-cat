@@ -1,49 +1,64 @@
-use iced::theme::Button;
-use iced::Border;
-use iced::{
-    widget::button::{Appearance, StyleSheet},
-    Background,
-};
+use iced::theme::{palette, Theme};
+use iced::widget::button::{Status, Style};
+use iced::{Background, Border};
 
 /// A custom theme that makes button transparent
-pub fn transparent_button_theme() -> Button {
-    Button::Custom(Box::new(TransparentButtonTheme) as Box<dyn StyleSheet<Style = iced::Theme>>)
+pub fn transparent_button_theme(theme: &Theme, status: Status) -> Style {
+    let palette = theme.extended_palette();
+    let base = transparent_styled(palette.success.base);
+
+    match status {
+        Status::Active | Status::Pressed => base,
+        Status::Hovered => Style {
+            background: Some(Background::Color(palette.success.strong.color)),
+            ..base
+        },
+        Status::Disabled => disabled(base),
+    }
 }
 
 /// A custom theme that makes button transparent, with rounded border
-pub fn transparent_button_with_rounded_border_theme() -> Button {
-    Button::Custom(Box::new(TransparentButtonWithRoundedBorderTheme)
-        as Box<dyn StyleSheet<Style = iced::Theme>>)
-}
+pub fn transparent_button_with_rounded_border_theme(theme: &Theme, status: Status) -> Style {
+    let palette = theme.extended_palette();
+    let base = transparent_with_rounded_border_styled(palette.success.base);
 
-pub struct TransparentButtonTheme;
-
-impl StyleSheet for TransparentButtonTheme {
-    type Style = iced::Theme;
-
-    fn active(&self, style: &Self::Style) -> Appearance {
-        Appearance {
-            text_color: style.palette().text,
-            background: Some(Background::Color(iced::Color::TRANSPARENT)),
-            ..Default::default()
-        }
+    match status {
+        Status::Active | Status::Pressed => base,
+        Status::Hovered => Style {
+            background: Some(Background::Color(palette.success.strong.color)),
+            ..base
+        },
+        Status::Disabled => disabled(base),
     }
 }
-pub struct TransparentButtonWithRoundedBorderTheme;
 
-impl StyleSheet for TransparentButtonWithRoundedBorderTheme {
-    type Style = iced::Theme;
+fn transparent_styled(pair: palette::Pair) -> Style {
+    Style {
+        background: Some(Background::Color(iced::Color::TRANSPARENT)),
+        text_color: pair.text,
+        ..Style::default()
+    }
+}
 
-    fn active(&self, style: &Self::Style) -> Appearance {
-        Appearance {
-            text_color: style.palette().text,
-            border: Border {
-                color: super::colors::accent_color(),
-                width: 1.0,
-                radius: 10.0.into(),
-            },
-            background: Some(Background::Color(iced::Color::TRANSPARENT)),
-            ..Default::default()
-        }
+fn transparent_with_rounded_border_styled(pair: palette::Pair) -> Style {
+    Style {
+        background: Some(Background::Color(iced::Color::TRANSPARENT)),
+        text_color: pair.text,
+        border: Border {
+            color: super::colors::accent_color(),
+            width: 1.0,
+            radius: 10.0.into(),
+        },
+        ..Style::default()
+    }
+}
+
+fn disabled(style: Style) -> Style {
+    Style {
+        background: style
+            .background
+            .map(|background| background.scale_alpha(0.5)),
+        text_color: style.text_color.scale_alpha(0.5),
+        ..style
     }
 }

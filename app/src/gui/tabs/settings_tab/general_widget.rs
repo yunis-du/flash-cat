@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use iced::widget::{
     button, column, container, horizontal_space, mouse_area, row, text, text_input,
 };
-use iced::{mouse, Command, Element};
+use iced::{mouse, Element, Task};
 
 use super::settings_config::SETTINGS;
 use crate::folder::pick_floder;
@@ -35,23 +35,23 @@ impl General {
         Self { relay_addr }
     }
 
-    pub fn update(&mut self, message: Message) -> Command<Message> {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::RelayAddrChanged(input) => {
                 self.relay_addr = input;
-                Command::none()
+                Task::none()
             }
             Message::RelayAddrSubimt => {
                 let mut settings_write = SETTINGS.write().unwrap();
                 settings_write.change_settings().general.relay_addr = self.relay_addr.clone();
                 settings_write.save_settings();
-                Command::none()
+                Task::none()
             }
             Message::OpenDownloadPath(path) => {
                 let _ = open::that(Path::new(path.as_str()));
-                Command::none()
+                Task::none()
             }
-            Message::ModifySavePath => Command::perform(pick_floder(), |result| {
+            Message::ModifySavePath => Task::perform(pick_floder(), |result| {
                 Message::UpdateSavePath(result.map_err(|err| err.to_string()))
             }),
             Message::UpdateSavePath(save_path_result) => {
@@ -63,7 +63,7 @@ impl General {
                         settings_write.save_settings();
                     }
                 }
-                Command::none()
+                Task::none()
             }
         }
     }
@@ -71,7 +71,7 @@ impl General {
     pub fn view(&self) -> Element<Message> {
         let content = column![text("General")
             .size(21)
-            .style(styles::text_styles::accent_color_theme())]
+            .style(styles::text_styles::accent_color_theme)]
         .padding(5)
         .spacing(5);
 
@@ -105,8 +105,8 @@ impl General {
                 text("The path where the received file is saved"),
                 row![
                     mouse_area(
-                        text(current_download_path.as_str())
-                            .style(styles::text_styles::accent_color_theme()),
+                        text(current_download_path.clone())
+                            .style(styles::text_styles::accent_color_theme),
                     )
                     .interaction(mouse::Interaction::Pointer)
                     .on_press(Message::OpenDownloadPath(current_download_path.clone())),
@@ -120,7 +120,7 @@ impl General {
         let content = content.push(relay_addr_widget).push(save_path_widget);
 
         container(content)
-            .style(styles::container_styles::first_class_container_rounded_theme())
+            .style(styles::container_styles::first_class_container_rounded_theme)
             .width(1000)
             .into()
     }

@@ -8,7 +8,7 @@ use general_widget::{General, Message as GeneralMessage};
 use iced::{
     widget::scrollable::{RelativeOffset, Viewport},
     widget::{column, scrollable},
-    Command, Element,
+    Task, Element,
 };
 use iced::{Alignment, Length};
 
@@ -33,8 +33,8 @@ pub struct SettingsTab {
 }
 
 impl SettingsTab {
-    pub fn new() -> (Self, Command<Message>) {
-        let (about_widget, about_command) = About::new();
+    pub fn new() -> (Self, Task<Message>) {
+        let (about_widget, about_task) = About::new();
         (
             Self {
                 appearance_settings: Appearance,
@@ -42,11 +42,11 @@ impl SettingsTab {
                 about: about_widget,
                 scrollable_offset: RelativeOffset::START,
             },
-            about_command.map(Message::About),
+            about_task.map(Message::About),
         )
     }
 
-    pub fn update(&mut self, message: Message) -> Command<Message> {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Appearance(message) => self
                 .appearance_settings
@@ -55,10 +55,10 @@ impl SettingsTab {
             Message::General(message) => {
                 self.general_settings.update(message).map(Message::General)
             }
-            Message::About(message) => self.about.update(message).map(Message::About),
+            Message::About(message) => {self.about.update(message).map(Message::About)},
             Message::PageScrolled(view_port) => {
                 self.scrollable_offset = view_port.relative_offset();
-                Command::none()
+                Task::none()
             }
         }
     }
@@ -71,7 +71,7 @@ impl SettingsTab {
             ]
             .spacing(10)
             .width(Length::Fill)
-            .align_items(Alignment::Center)
+            .align_x(Alignment::Center)
             .padding(5),
         )
         .id(Self::scrollable_id())
@@ -79,7 +79,7 @@ impl SettingsTab {
         .direction(styles::scrollable_styles::vertical_direction());
 
         column![settings_body.height(Length::FillPortion(10))]
-            .align_items(Alignment::Center)
+            .align_x(Alignment::Center)
             .spacing(5)
             .into()
     }

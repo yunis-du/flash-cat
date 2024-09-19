@@ -1,87 +1,68 @@
 use std::sync::Arc;
 
 use flash_cat_core::sender::FlashCatSender;
-use flash_cat_core::{sender::SenderStream, SenderInteractionMessage};
-use iced::futures::StreamExt;
+use flash_cat_core::SenderInteractionMessage;
+use iced::futures::{SinkExt, Stream, StreamExt};
+use iced::stream::try_channel;
 
-use super::{SenderState, SenderNotification, SENDER_STATE, SENDER_NOTIFICATION};
+use super::{SenderNotification, SENDER_NOTIFICATION};
 
-pub fn send(fcs: Arc<FlashCatSender>) -> iced::Subscription<(u64, Progress)> {
-    iced::subscription::unfold(0, State::Ready(fcs), move |state| run(state))
+pub fn send(fcs: Arc<FlashCatSender>) -> iced::Subscription<Result<(u64, Progress), Error>> {
+    iced::Subscription::run_with_id(0, run(fcs).map(move |progress| progress))
 }
 
-pub async fn run(state: State) -> ((u64, Progress), State) {
-    match state {
-        State::Ready(fcs) => {
-            let stream = fcs.clone().start().await.unwrap();
-            ((0, Progress::Started), State::Sending(stream))
-        }
-        State::Sending(mut stream) => {
-            if let Some(sender_msg) = stream.next().await {
-                match sender_msg {
-                    SenderInteractionMessage::Message(msg) => {
-                        *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Message(msg);
-                        ((0, Progress::None), State::Sending(stream))
-                    }
-                    SenderInteractionMessage::Error(e) => {
-                        *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Errored(e);
-                        ((0, Progress::None), State::Finished)
-                    }
-                    SenderInteractionMessage::ReceiverReject => {
-                        *SENDER_STATE.write().unwrap() = SenderState::Reject;
-                        ((0, Progress::None), State::Finished)
-                    }
-                    SenderInteractionMessage::RelayFailed((relay_type, error)) => {
-                        *SENDER_NOTIFICATION.write().unwrap() =
-                            SenderNotification::Errored(format!(
-                                "connect to {} relay failed: {}",
-                                relay_type.to_string(),
-                                error
-                            ));
-                        ((0, Progress::None), State::Finished)
-                    }
-                    SenderInteractionMessage::ContinueFile(file_id) => {
-                        ((file_id, Progress::Skip), State::Sending(stream))
-                    }
-                    SenderInteractionMessage::FileProgress(file_progress) => (
-                        (
+pub fn run(fcs: Arc<FlashCatSender>) -> impl Stream<Item = Result<(u64, Progress), Error>> {
+    try_channel(1, move |mut sender| async move {
+        let mut stream = fcs.start().await.unwrap();
+        while let Some(sender_msg) = stream.next().await {
+            match sender_msg {
+                SenderInteractionMessage::Message(msg) => {
+                    *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Message(msg);
+                }
+                SenderInteractionMessage::Error(e) => {
+                    return Err(Error::Errored(e));
+                }
+                SenderInteractionMessage::ReceiverReject => {
+                    return Err(Error::Reject);
+                }
+                SenderInteractionMessage::RelayFailed((relay_type, error)) => {
+                    return Err(Error::RelayFailed(format!(
+                        "connect to {} relay failed: {}",
+                        relay_type.to_string(),
+                        error
+                    )));
+                }
+                SenderInteractionMessage::ContinueFile(file_id) => {
+                    let _ = sender.send((file_id, Progress::Skip)).await;
+                }
+                SenderInteractionMessage::FileProgress(file_progress) => {
+                    let _ = sender
+                        .send((
                             file_progress.file_id,
                             Progress::Sent(file_progress.position as f32),
-                        ),
-                        State::Sending(stream),
-                    ),
-                    SenderInteractionMessage::FileProgressFinish(file_id) => {
-                        ((file_id, Progress::Finished), State::Sending(stream))
-                    }
-                    SenderInteractionMessage::OtherClose => {
-                        *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Message(
-                            "The receive end is interrupted.".to_string(),
-                        );
-                        ((0, Progress::None), State::Finished)
-                    }
-                    SenderInteractionMessage::SendDone => {
-                        *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Message(
-                            "Send files done. Waiting for the receiver to receive finish..."
-                                .to_string(),
-                        );
-                        ((0, Progress::None), State::Sending(stream))
-                    }
-                    SenderInteractionMessage::Completed => {
-                        ((0, Progress::Finished), State::Finished)
-                    }
+                        ))
+                        .await;
                 }
-            } else {
-                *SENDER_NOTIFICATION.write().unwrap() =
-                    SenderNotification::Errored("stream error".to_string());
-                ((0, Progress::None), State::Finished)
+                SenderInteractionMessage::FileProgressFinish(file_id) => {
+                    let _ = sender.send((file_id, Progress::Finished)).await;
+                }
+                SenderInteractionMessage::OtherClose => {
+                    return Err(Error::OtherClose);
+                }
+                SenderInteractionMessage::SendDone => {
+                    *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Message(
+                        "Send files done. Waiting for the receiver to receive finish..."
+                            .to_string(),
+                    );
+                    let _ = sender.send((0, Progress::None)).await;
+                }
+                SenderInteractionMessage::Completed => {
+                    let _ = sender.send((0, Progress::None)).await;
+                }
             }
         }
-        State::Finished => {
-            *SENDER_STATE.write().unwrap() = SenderState::SendDone;
-            *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Normal;
-            iced::futures::future::pending().await
-        }
-    }
+        Ok(())
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -93,8 +74,10 @@ pub enum Progress {
     Skip,
 }
 
-pub enum State {
-    Ready(Arc<FlashCatSender>),
-    Sending(SenderStream),
-    Finished,
+#[derive(Debug, Clone)]
+pub enum Error {
+    Reject,
+    OtherClose,
+    Errored(String),
+    RelayFailed(String),
 }

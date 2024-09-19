@@ -22,8 +22,8 @@ serde.workspace = true
 log.workspace = true
 tokio.workspace = true
 indicatif.workspace = true
-iced = { version = "0.12.1", features = ["image", "svg", "tokio"] }
-iced_aw = "0.9.3"
+iced = { version = "0.13.0", features = ["image", "svg", "tokio", "wgpu"] }
+iced_aw = "0.10.0"
 webbrowser = "1.0.1"
 rfd = "0.14.1"
 directories = "5.0.1"

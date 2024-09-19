@@ -1,6 +1,6 @@
 use iced::{
     widget::{column, container, radio, text, Column, Space},
-    Command, Element, Length,
+    Task, Element, Length,
 };
 
 use super::settings_config::{Theme, ALL_THEMES, SETTINGS};
@@ -15,14 +15,14 @@ pub enum Message {
 pub struct Appearance;
 
 impl Appearance {
-    pub fn update(&mut self, message: Message) -> Command<Message> {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::ThemeSelected(theme) => {
                 let mut settings_write = SETTINGS.write().unwrap();
                 settings_write.change_settings().appearance.theme = theme;
                 settings_write.save_settings();
 
-                Command::none()
+                Task::none()
             }
         }
     }
@@ -30,7 +30,7 @@ impl Appearance {
     pub fn view(&self) -> Element<Message> {
         let content = column![text("Appearance")
             .size(21)
-            .style(styles::text_styles::accent_color_theme())]
+            .style(styles::text_styles::accent_color_theme)]
         .padding(5)
         .spacing(5);
 
@@ -51,6 +51,8 @@ impl Appearance {
                 radio(theme.to_string(), theme, current_theme.as_ref(), |theme| {
                     Message::ThemeSelected(theme.clone())
                 })
+                .text_size(14)
+                .size(20)
                 .into();
             elem
         }))
@@ -63,7 +65,7 @@ impl Appearance {
         );
 
         container(content)
-            .style(styles::container_styles::first_class_container_rounded_theme())
+            .style(styles::container_styles::first_class_container_rounded_theme)
             .width(Length::Fill)
             .into()
     }

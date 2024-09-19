@@ -15,9 +15,9 @@ use iced::widget::{
 use iced::{
     font, mouse,
     widget::{button, column, container, horizontal_space, mouse_area, row, scrollable, svg, text},
-    Alignment, Command, Element, Font, Length,
+    Alignment, Element, Font, Length, Task,
 };
-use sender::send;
+use sender::{send, Error, Progress};
 
 use super::{settings_tab::settings_config::SETTINGS, Tab};
 use crate::{
@@ -82,7 +82,7 @@ pub enum Message {
     Remove(String),
     RemoveAll,
     ProgressBar(ProgressBarMessage),
-    SendProgressed((u64, sender::Progress)),
+    SendProgressed(Result<(u64, Progress), Error>),
 }
 
 pub struct SenderTab {
@@ -98,7 +98,7 @@ pub struct SenderTab {
 }
 
 impl SenderTab {
-    pub fn new() -> (Self, Command<Message>) {
+    pub fn new() -> (Self, Task<Message>) {
         (
             Self {
                 scrollable_offset: RelativeOffset::START,
@@ -111,7 +111,7 @@ impl SenderTab {
                 progress_bars: vec![],
                 start_send: false,
             },
-            Command::none(),
+            Task::none(),
         )
     }
 
@@ -134,18 +134,18 @@ impl SenderTab {
         iced::Subscription::batch(batch)
     }
 
-    pub fn update(&mut self, message: Message) -> Command<Message> {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::PageScrolled(view_port) => {
                 self.scrollable_offset = view_port.relative_offset();
             }
             Message::PickFiles => {
-                return Command::perform(pick_files(), |result| {
+                return Task::perform(pick_files(), |result| {
                     Message::AddPickedPath(result.map_err(|err| err.to_string()))
                 });
             }
             Message::PickFloders => {
-                return Command::perform(pick_floders(), |result| {
+                return Task::perform(pick_floders(), |result| {
                     Message::AddPickedPath(result.map_err(|err| err.to_string()))
                 });
             }
@@ -259,9 +259,9 @@ impl SenderTab {
             }
             Message::CopySharCode => {
                 COPYED_BUTTON_STATE.store(true, Ordering::Relaxed);
-                return Command::batch([
+                return Task::batch([
                     iced::clipboard::write(self.share_code.clone()),
-                    Command::perform(
+                    Task::perform(
                         async move { tokio::time::sleep(Duration::from_secs(3)).await },
                         |_| Message::ResetCopyBut,
                     ),
@@ -283,28 +283,45 @@ impl SenderTab {
                 self.send_button_text = "".to_string();
             }
             Message::ProgressBar(_) => {}
-            Message::SendProgressed((file_id, progress)) => {
-                let new_state = match progress {
-                    sender::Progress::Sent(sent) => {
-                        if !SENDER_STATE.read().unwrap().eq(&SenderState::Sending) {
-                            *SENDER_STATE.write().unwrap() = SenderState::Sending;
+            Message::SendProgressed(progress) => match progress {
+                Ok((file_id, progress)) => {
+                    let new_state = match progress {
+                        sender::Progress::Sent(sent) => {
+                            if !SENDER_STATE.read().unwrap().eq(&SenderState::Sending) {
+                                *SENDER_STATE.write().unwrap() = SenderState::Sending;
+                            }
+                            Some(ProgressBarState::Progress(sent))
                         }
-                        Some(ProgressBarState::Progress(sent))
+                        sender::Progress::Finished => Some(ProgressBarState::Finished),
+                        sender::Progress::Skip => Some(ProgressBarState::Skip),
+                        _ => None,
+                    };
+                    let progress_bar = self
+                        .progress_bars
+                        .iter_mut()
+                        .find(|progress_bar| progress_bar.get_id().eq(&file_id));
+                    if let Some(progress_bar) = progress_bar {
+                        progress_bar.update_state(new_state);
                     }
-                    sender::Progress::Finished => Some(ProgressBarState::Finished),
-                    sender::Progress::Skip => Some(ProgressBarState::Skip),
-                    _ => None,
-                };
-                let progress_bar = self
-                    .progress_bars
-                    .iter_mut()
-                    .find(|progress_bar| progress_bar.get_id().eq(&file_id));
-                if let Some(progress_bar) = progress_bar {
-                    progress_bar.update_state(new_state);
                 }
-            }
+                Err(e) => match e {
+                    Error::Reject => *SENDER_STATE.write().unwrap() = SenderState::Reject,
+                    Error::OtherClose => {
+                        *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Message(
+                            "The receive end is interrupted.".to_string(),
+                        );
+                    }
+                    Error::Errored(e) => {
+                        *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Errored(e)
+                    }
+                    Error::RelayFailed(err_msg) => {
+                        *SENDER_NOTIFICATION.write().unwrap() =
+                            SenderNotification::Errored(err_msg);
+                    }
+                },
+            },
         }
-        Command::none()
+        Task::none()
     }
 
     pub fn view(&self) -> Element<Message> {
@@ -320,10 +337,10 @@ impl SenderTab {
             text("Pick").size(16),
             horizontal_space(),
             row![pick_files_button, pick_floders_button]
-                .align_items(Alignment::Center)
+                .align_y(Alignment::Center)
                 .spacing(5),
         ]
-        .align_items(Alignment::Center)]
+        .align_y(Alignment::Center)]
         .padding(5);
 
         let mut send_button = button(row![
@@ -366,7 +383,7 @@ impl SenderTab {
                         weight: font::Weight::Bold,
                         ..Default::default()
                     }))
-                    .style(styles::container_styles::first_class_container_square_theme())
+                    .style(styles::container_styles::first_class_container_square_theme)
                     .padding(5)
                     .align_y(iced::alignment::Vertical::Center)
                 )
@@ -375,40 +392,41 @@ impl SenderTab {
                 if COPYED_BUTTON_STATE.load(Ordering::Relaxed) {
                     let copyed_icon_handle = svg::Handle::from_memory(TICK_ICON);
                     let copyed_icon = svg(copyed_icon_handle)
-                        .style(styles::svg_styles::colored_svg_theme())
+                        .style(styles::svg_styles::colored_svg_theme)
                         .height(20)
                         .width(20);
                     row![
                         button(copyed_icon)
-                            .style(styles::button_styles::transparent_button_theme())
+                            .style(styles::button_styles::transparent_button_theme)
                             .on_press(Message::CopySharCode),
-                        text("Copyed").style(styles::text_styles::accent_color_theme())
+                        text("Copyed").style(styles::text_styles::accent_color_theme)
                     ]
-                    .align_items(Alignment::Center)
+                    .align_y(Alignment::Center)
                 } else {
                     let copy_icon_handle = svg::Handle::from_memory(COPY_ICON);
                     let copy_icon = svg(copy_icon_handle)
-                        .style(styles::svg_styles::colored_svg_theme())
+                        .style(styles::svg_styles::colored_svg_theme)
                         .height(20)
                         .width(20);
                     row![button(copy_icon)
-                        .style(styles::button_styles::transparent_button_theme())
+                        .style(styles::button_styles::transparent_button_theme)
                         .on_press(Message::CopySharCode)]
                 }
             ]
             .spacing(5)
-            .align_items(Alignment::Center)
+            .align_y(Alignment::Center)
         } else {
             row![]
         };
 
-        let notification = match &*SENDER_NOTIFICATION.read().unwrap() {
+        let sender_notification = SENDER_NOTIFICATION.read().unwrap();
+        let notification = match sender_notification.clone() {
             SenderNotification::Normal => row![],
             SenderNotification::Message(msg) => {
-                row![text(msg).style(styles::text_styles::accent_color_theme())]
+                row![text(msg).style(styles::text_styles::accent_color_theme)]
             }
             SenderNotification::Errored(err) => {
-                row![text(err).style(styles::text_styles::red_text_theme())]
+                row![text(err).style(styles::text_styles::red_text_theme)]
             }
         };
 
@@ -430,9 +448,9 @@ impl SenderTab {
                 weight: font::Weight::Bold,
                 ..Default::default()
             }))
-            .center_x()
-            .center_y()
-            .style(styles::container_styles::first_class_container_rounded_theme())
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(styles::container_styles::first_class_container_rounded_theme)
             .height(300)
             .width(Length::Fill);
             column!(text).width(Length::Fill).spacing(5).into()
@@ -445,11 +463,12 @@ impl SenderTab {
                             .iter()
                             .map(|path| {
                                 row![
-                                    text(&path).style(styles::text_styles::accent_color_theme()),
+                                    text(path.clone())
+                                        .style(styles::text_styles::accent_color_theme),
                                     horizontal_space(),
                                     remove_button(path.to_owned()),
                                 ]
-                                .align_items(iced::Alignment::Center)
+                                .align_y(iced::Alignment::Center)
                                 .into()
                             })
                             .collect::<Vec<_>>(),
@@ -473,7 +492,7 @@ impl SenderTab {
                 .height(300)
                 .direction(styles::scrollable_styles::vertical_direction()),
             )
-            .style(styles::container_styles::first_class_container_rounded_theme())
+            .style(styles::container_styles::first_class_container_rounded_theme)
             .width(Length::Fill)
             .into();
 
@@ -545,11 +564,11 @@ impl Tab for SenderTab {
 fn remove_button(id: String) -> Element<'static, Message> {
     let remove_icon_handle = svg::Handle::from_memory(REMOVE_ICON);
     let remove_icon = svg(remove_icon_handle)
-        .style(styles::svg_styles::colored_svg_theme())
+        .style(styles::svg_styles::colored_svg_theme)
         .width(Length::Shrink);
 
     button(remove_icon)
-        .style(styles::button_styles::transparent_button_theme())
+        .style(styles::button_styles::transparent_button_theme)
         .on_press(Message::Remove(id))
         .into()
 }

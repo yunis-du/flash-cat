@@ -3,7 +3,7 @@ use std::sync::Arc;
 use iced::{
     font::Weight,
     widget::{column, container, image, row, text},
-    Application, Command, Element, Font, Length,
+    Element, Font, Length, Task,
 };
 use tabs::{
     settings_tab::settings_config::{self, SETTINGS},
@@ -28,38 +28,18 @@ pub enum Message {
     TabsController(TabsControllerMessage),
 }
 
-impl<'a> Application for FlashCatApp {
-    type Executor = iced::executor::Default;
-
-    type Message = Message;
-
-    type Theme = iced::Theme;
-
-    type Flags = ();
-
-    fn new(_flags: Self::Flags) -> (Self, iced::Command<Self::Message>) {
-        let (tabs_controller, tabs_controller_command) = TabsController::new();
-        (
-            Self {
-                active_tab: TabId::Sender,
-                title_bar: TitleBar::new(),
-                tabs_controller,
-            },
-            tabs_controller_command.map(Message::TabsController),
-        )
-    }
-
-    fn title(&self) -> String {
+impl FlashCatApp {
+    pub fn title(&self) -> String {
         format!("FlashCat - {}", self.active_tab.to_string())
     }
 
-    fn subscription(&self) -> iced::Subscription<Message> {
+    pub fn subscription(&self) -> iced::Subscription<Message> {
         self.tabs_controller
             .subscription()
             .map(Message::TabsController)
     }
 
-    fn update(&mut self, message: Message) -> Command<Message> {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::TitleBar(message) => {
                 self.title_bar.update(message.clone());
@@ -73,14 +53,14 @@ impl<'a> Application for FlashCatApp {
                     }
                 }
             }
-            Message::TabsController(message) => Command::batch([self
+            Message::TabsController(message) => Task::batch([self
                 .tabs_controller
                 .update(message)
                 .map(Message::TabsController)]),
         }
     }
 
-    fn view(&self) -> Element<Message> {
+    pub fn view(&self) -> Element<Message> {
         column![
             logo_widget(),
             self.title_bar
@@ -91,7 +71,7 @@ impl<'a> Application for FlashCatApp {
         .into()
     }
 
-    fn theme(&self) -> iced::Theme {
+    pub fn theme(&self) -> iced::Theme {
         let custom_theme = Arc::new(
             match SETTINGS
                 .read()
@@ -106,6 +86,17 @@ impl<'a> Application for FlashCatApp {
             .get_custom_theme(),
         );
         iced::Theme::Custom(custom_theme)
+    }
+}
+
+impl Default for FlashCatApp {
+    fn default() -> Self {
+        let (tabs_controller, _) = TabsController::new();
+        Self {
+            active_tab: TabId::Sender,
+            title_bar: TitleBar::new(),
+            tabs_controller,
+        }
     }
 }
 
@@ -142,21 +133,17 @@ pub mod title_bar {
                 let svg_handle = svg::Handle::from_memory(tab_label.icon);
                 let icon = svg(svg_handle)
                     .width(Length::Shrink)
-                    .style(styles::svg_styles::colored_svg_theme());
+                    .style(styles::svg_styles::colored_svg_theme);
                 let text_label = text(tab_label.text).size(18);
                 let mut tab = container(
-                    mouse_area(
-                        row![icon, text_label]
-                            .align_items(Alignment::Center)
-                            .spacing(5),
-                    )
-                    .on_press(Message::TabSelected(index)),
+                    mouse_area(row![icon, text_label].align_y(Alignment::Center).spacing(5))
+                        .on_press(Message::TabSelected(index)),
                 )
                 .padding(5);
 
                 // Highlighting the tab if is active
                 if index == self.active_tab {
-                    tab = tab.style(styles::container_styles::second_class_container_square_theme())
+                    tab = tab.style(styles::container_styles::second_class_container_square_theme)
                 };
                 tab.into()
             });
@@ -164,28 +151,28 @@ pub mod title_bar {
             let tab_views = Row::with_children(tab_views).spacing(10);
 
             container(row![horizontal_space(), tab_views, horizontal_space()])
-                .style(styles::container_styles::first_class_container_square_theme())
+                .style(styles::container_styles::first_class_container_square_theme)
                 .into()
         }
     }
 }
 
 fn logo_widget() -> Element<'static, Message> {
-    let logo_image = image(image::Handle::from_memory(assets::logos::IMG_LOGO)).height(65.0);
+    let logo_image = image(image::Handle::from_bytes(assets::logos::IMG_LOGO)).height(65.0);
     let logo_text = text("Flash Cat")
         .size(20)
         .font(Font {
             weight: Weight::Bold,
             ..Default::default()
         })
-        .style(styles::text_styles::brown_text_theme());
+        .style(styles::text_styles::brown_text_theme);
     container(
         row![logo_image, logo_text]
-            .align_items(iced::Alignment::Center)
+            .align_y(iced::Alignment::Center)
             .spacing(10),
     )
     .width(Length::Fill)
-    .center_x()
-    .center_y()
+    .center_x(Length::Fill)
+    // .center_y(Length::Fill)
     .into()
 }
