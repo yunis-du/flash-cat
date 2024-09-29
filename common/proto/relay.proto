@@ -2,11 +2,37 @@ syntax = "proto3";
 package relay;
 
 service RelayService {
+  // Join-created relay session.
+  rpc Join(JoinRequest) returns (JoinResponse);
+
   // Stream real-time interactive to the session.
   rpc Channel(stream RelayUpdate) returns (stream RelayUpdate);
 
   // Gracefully shut down an existing relay session.
   rpc Close(CloseRequest) returns (CloseResponse);
+}
+
+// Request to open an relay session.
+message JoinRequest {
+  Id id = 1;  // Join-created id info.
+}
+
+// Details of relay session.
+message JoinResponse {
+  oneof join_response_message {
+    JoinSuccess success = 1;  // Join relay session success.
+    JoinFailed failed = 2;    // Join relay session failed.
+  }
+}
+
+// Join success.
+message JoinSuccess {
+  uint32 relay_port = 1;  // Port of relay.
+}
+
+// Join failed.
+message JoinFailed {
+  string error_msg = 1; // Join failed message.
 }
 
 // Request to stop a relay session gracefully.
@@ -20,7 +46,7 @@ message CloseResponse {}
 // Bidirectional streaming update from the relay server.
 message RelayUpdate{
   oneof relay_message {
-    Join join = 1;           // First stream message: join session.
+    Id join = 1;           // First stream message: join session.
     Joined joined = 2;
     Ready ready = 3;
     SenderUpdate sender = 4;
@@ -33,8 +59,8 @@ message RelayUpdate{
   }
 }
 
-// Request to join an relay session.
-message Join {
+// Join to the ID of the relay session.
+message Id {
   bytes encrypted_share_code = 1;  // Encrypted share code.
   Character character = 2;         // Character.
 }
@@ -45,7 +71,7 @@ message Ready {}
 
 enum Character {
   Sender = 0;     // Character of sharer.
-  Receiver = 1;  // Character of recipient.
+  Receiver = 1;   // Character of recipient.
 }
 
 message Done {}

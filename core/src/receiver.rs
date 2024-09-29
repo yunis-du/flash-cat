@@ -18,11 +18,14 @@ use flash_cat_common::{
     consts::PUBLIC_RELAY,
     crypt::encryptor::Encryptor,
     proto::{
-        receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
+        join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
         relay_update::RelayMessage, sender_update::SenderMessage, Character, CloseRequest, Confirm,
-        Done, FileConfirm, Join, ReceiverUpdate, RelayUpdate,
+        Done, FileConfirm, Id, JoinRequest, ReceiverUpdate, RelayUpdate,
     },
-    utils::{get_time_ms, net::net_scout::NetScout},
+    utils::{
+        get_time_ms,
+        net::{get_domain_ip, net_scout::NetScout},
+    },
     Shutdown,
 };
 
@@ -79,7 +82,7 @@ impl FlashCatReceiver {
             };
             let endpoint = Endpoint::from_shared(specify_relay_addr)?;
             self.connect_relay(endpoint, receiver_stream_tx.clone(), self.shutdown.clone())
-                .await;
+                .await?;
         } else {
             // discovery relay addr
             let relay_addr = self.discovery_relay_addr().await;
@@ -87,12 +90,12 @@ impl FlashCatReceiver {
                 let relay_addr = relay_addr.unwrap();
                 let endpoint = Endpoint::from_shared(format!("http://{relay_addr}"))?;
                 self.connect_relay(endpoint, receiver_stream_tx.clone(), self.shutdown.clone())
-                    .await;
+                    .await?;
             } else {
                 // public relay
                 let endpoint = Endpoint::from_shared(format!("https://{PUBLIC_RELAY}"))?;
                 self.connect_relay(endpoint, receiver_stream_tx.clone(), self.shutdown.clone())
-                    .await;
+                    .await?;
             }
         }
         // resolve shutdown when receiver_stream_rx is no message will cause panic
@@ -127,14 +130,47 @@ impl FlashCatReceiver {
 
     async fn connect_relay(
         &self,
-        endpoint: Endpoint,
+        mut endpoint: Endpoint,
         receiver_stream_tx: mpsc::Sender<ReceiverInteractionMessage>,
         shutdown: Shutdown,
-    ) {
+    ) -> Result<()> {
+        let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
+
+        let resp = client
+            .join(JoinRequest {
+                id: Some(Id {
+                    encrypted_share_code: self.encryptor.encrypt_share_code_bytes(),
+                    character: Character::Receiver.into(),
+                }),
+            })
+            .await?;
+
+        let relay_port =
+            if let Some(join_response_message) = resp.into_inner().join_response_message {
+                match join_response_message {
+                    join_response::JoinResponseMessage::Success(join_success) => {
+                        join_success.relay_port
+                    }
+                    join_response::JoinResponseMessage::Failed(join_failed) => {
+                        return Err(anyhow::Error::msg(join_failed.error_msg))
+                    }
+                }
+            } else {
+                return Err(anyhow::Error::msg("can't get relay ip and port"));
+            };
+
+        let relay_uri = endpoint.uri().to_string();
+        let relay_ip = get_domain_ip(relay_uri.as_str());
+        if relay_port != 0 && relay_ip.is_some() {
+            // Directly connect to Relay, improve performance
+            endpoint =
+                Endpoint::from_shared(format!("http://{}:{}", relay_ip.unwrap(), relay_port))?;
+        }
+
         let encryptor = self.encryptor.clone();
         let confirm_rx = self.confirm_rx.clone();
         tokio::spawn(async move {
-            if let Err(e) = Self::real_connect_relay(
+            if let Err(e) = Self::relay_channel(
                 encryptor,
                 endpoint,
                 &receiver_stream_tx,
@@ -148,9 +184,10 @@ impl FlashCatReceiver {
                     .await;
             }
         });
+        Ok(())
     }
 
-    async fn real_connect_relay(
+    async fn relay_channel(
         encryptor: Arc<Encryptor>,
         endpoint: Endpoint,
         receiver_stream_tx: &mpsc::Sender<ReceiverInteractionMessage>,
@@ -161,7 +198,7 @@ impl FlashCatReceiver {
 
         let (tx, rx) = mpsc::channel(1024);
 
-        let join = RelayMessage::Join(Join {
+        let join = RelayMessage::Join(Id {
             encrypted_share_code: encryptor.encrypt_share_code_bytes(),
             character: Character::Receiver.into(),
         });

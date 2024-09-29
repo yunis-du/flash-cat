@@ -7,8 +7,9 @@ use tonic::{Request, Response, Status, Streaming};
 
 use flash_cat_common::{
     proto::{
-        relay_service_server::RelayService, relay_update::RelayMessage, Character, CloseRequest,
-        CloseResponse, Joined, Ready, RelayUpdate, Terminated,
+        join_response::JoinResponseMessage, relay_service_server::RelayService,
+        relay_update::RelayMessage, Character, CloseRequest, CloseResponse, JoinFailed,
+        JoinRequest, JoinResponse, JoinSuccess, Joined, Ready, RelayUpdate, Terminated,
     },
     utils::get_time_ms,
 };
@@ -33,6 +34,52 @@ type RR<T> = Result<Response<T>, Status>;
 impl RelayService for GrpcServer {
     type ChannelStream = ReceiverStream<Result<RelayUpdate, Status>>;
 
+    async fn join(&self, request: Request<JoinRequest>) -> RR<JoinResponse> {
+        let relay_port = match request.local_addr() {
+            Some(local_addr) => local_addr.port() as u32,
+            None => 0,
+        };
+
+        let request = request.into_inner();
+        match request.id {
+            Some(id) => {
+                let session_name =
+                    String::from_utf8_lossy(id.encrypted_share_code.as_ref()).to_string();
+                let character = match Character::try_from(id.character) {
+                    Ok(character) => character,
+                    Err(_) => return Err(Status::invalid_argument("unknown character")),
+                };
+                match character {
+                    Character::Sender => match self.0.lookup(&session_name) {
+                        Some(_) => return Err(Status::already_exists("duplicate session_name")),
+                        None => {
+                            debug!("new sharer[{session_name}] incoming");
+                            let metadata = Metadata {
+                                encrypted_share_code: id.encrypted_share_code,
+                            };
+                            let session = Arc::new(Session::new(metadata));
+                            self.0.insert(&session_name, session.clone());
+                        }
+                    },
+                    Character::Receiver => match self.0.lookup(&session_name) {
+                        None => return Err(Status::not_found("session not found")),
+                        Some(_) => (),
+                    },
+                }
+                Ok(Response::new(JoinResponse {
+                    join_response_message: Some(JoinResponseMessage::Success(JoinSuccess {
+                        relay_port,
+                    })),
+                }))
+            }
+            None => Ok(Response::new(JoinResponse {
+                join_response_message: Some(JoinResponseMessage::Failed(JoinFailed {
+                    error_msg: "Id is required".to_string(),
+                })),
+            })),
+        }
+    }
+
     async fn channel(&self, request: Request<Streaming<RelayUpdate>>) -> RR<Self::ChannelStream> {
         let mut stream = request.into_inner();
         let first_update = match stream.next().await {
@@ -50,25 +97,11 @@ impl RelayService for GrpcServer {
                     Ok(character) => character,
                     Err(_) => return Err(Status::invalid_argument("unknown character")),
                 };
-                let session = match character {
-                    Character::Sender => match self.0.lookup(&session_name) {
-                        Some(_) => return Err(Status::already_exists("duplicate session_name")),
-                        None => {
-                            debug!("new sharer[{session_name}] incoming");
-                            let metadata = Metadata {
-                                encrypted_share_code: join.encrypted_share_code,
-                            };
-                            let session = Arc::new(Session::new(metadata));
-                            self.0.insert(&session_name, session.clone());
-                            send_msg(&tx, RelayMessage::Joined(Joined {})).await;
-                            session
-                        }
-                    },
-                    Character::Receiver => match self.0.lookup(&session_name) {
-                        None => return Err(Status::not_found("session not found")),
-                        Some(session) => session,
-                    },
+                let session = match self.0.lookup(&session_name) {
+                    None => return Err(Status::not_found("session not found")),
+                    Some(session) => session,
                 };
+                send_msg(&tx, RelayMessage::Joined(Joined {})).await;
                 (session, character)
             }
             _ => return Err(Status::invalid_argument("invalid first message")),

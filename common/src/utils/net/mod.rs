@@ -1,4 +1,4 @@
-use std::net::{SocketAddr, TcpListener};
+use std::net::{IpAddr, SocketAddr, TcpListener, ToSocketAddrs};
 
 pub mod net_scout;
 
@@ -10,5 +10,34 @@ pub fn find_available_port(base_port: u16) -> u16 {
             break port;
         }
         port += 1;
+    }
+}
+
+pub fn get_domain_ip(domain: &str) -> Option<IpAddr> {
+    let domain = match extract_domain_or_ip(domain) {
+        Some(domain) => domain,
+        None => domain.to_owned(),
+    };
+    match (domain, 80).to_socket_addrs() {
+        Ok(mut addrs) => match addrs.next() {
+            Some(socket_addr) => Some(socket_addr.ip()),
+            None => None,
+        },
+        Err(_) => None,
+    }
+}
+
+fn extract_domain_or_ip(domain: &str) -> Option<String> {
+    let last = domain.split("://").last()?;
+    let mut last_by_last = last.split(":");
+    let domain = if last_by_last.clone().count() > 1 {
+        last_by_last.next()?
+    } else {
+        last
+    };
+    if domain.ends_with("/") {
+        Some(domain.replace("/", ""))
+    } else {
+        Some(domain.to_string())
     }
 }
