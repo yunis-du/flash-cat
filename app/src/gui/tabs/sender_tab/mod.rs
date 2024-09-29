@@ -8,14 +8,17 @@ use std::{
 };
 
 use flash_cat_core::sender::FlashCatSender;
-use iced::widget::{
-    scrollable::{Id, RelativeOffset, Viewport},
-    Column,
-};
 use iced::{
     font, mouse,
     widget::{button, column, container, horizontal_space, mouse_area, row, scrollable, svg, text},
     Alignment, Element, Font, Length, Task,
+};
+use iced::{
+    widget::{
+        scrollable::{Id, RelativeOffset, Viewport},
+        Column,
+    },
+    Padding,
 };
 use sender::{send, Error, Progress};
 
@@ -463,9 +466,9 @@ impl SenderTab {
                             .iter()
                             .map(|path| {
                                 row![
-                                    row![text(path.clone())
-                                        .style(styles::text_styles::accent_color_theme)]
-                                    .width(Length::Fixed(420.0)),
+                                    text(path.clone())
+                                        .style(styles::text_styles::accent_color_theme),
+                                    horizontal_space(),
                                     remove_button(path.to_owned()),
                                 ]
                                 .align_y(iced::Alignment::Center)
@@ -473,7 +476,12 @@ impl SenderTab {
                             })
                             .collect::<Vec<_>>(),
                     )
-                    .padding(10)
+                    .padding(Padding {
+                        top: 10.0,
+                        right: 0.0,
+                        bottom: 10.0,
+                        left: 10.0,
+                    })
                     .spacing(5)
                     .width(Length::Fill)
                 } else {
@@ -483,7 +491,12 @@ impl SenderTab {
                             .map(|progress_bar| progress_bar.view().map(Message::ProgressBar))
                             .collect(),
                     )
-                    .padding(10)
+                    .padding(Padding {
+                        top: 10.0,
+                        right: 0.0,
+                        bottom: 10.0,
+                        left: 10.0,
+                    })
                     .spacing(5)
                     .width(Length::Fill)
                 })
