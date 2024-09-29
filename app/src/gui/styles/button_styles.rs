@@ -8,11 +8,7 @@ pub fn transparent_button_theme(theme: &Theme, status: Status) -> Style {
     let base = transparent_styled(palette.success.base);
 
     match status {
-        Status::Active | Status::Pressed => base,
-        Status::Hovered => Style {
-            background: Some(Background::Color(palette.success.strong.color)),
-            ..base
-        },
+        Status::Active | Status::Pressed | Status::Hovered => base,
         Status::Disabled => disabled(base),
     }
 }
@@ -23,11 +19,7 @@ pub fn transparent_button_with_rounded_border_theme(theme: &Theme, status: Statu
     let base = transparent_with_rounded_border_styled(palette.success.base);
 
     match status {
-        Status::Active | Status::Pressed => base,
-        Status::Hovered => Style {
-            background: Some(Background::Color(palette.success.strong.color)),
-            ..base
-        },
+        Status::Active | Status::Pressed | Status::Hovered => base,
         Status::Disabled => disabled(base),
     }
 }

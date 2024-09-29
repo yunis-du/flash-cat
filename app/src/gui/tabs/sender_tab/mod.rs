@@ -463,9 +463,9 @@ impl SenderTab {
                             .iter()
                             .map(|path| {
                                 row![
-                                    text(path.clone())
-                                        .style(styles::text_styles::accent_color_theme),
-                                    horizontal_space(),
+                                    row![text(path.clone())
+                                        .style(styles::text_styles::accent_color_theme)]
+                                    .width(Length::Fixed(420.0)),
                                     remove_button(path.to_owned()),
                                 ]
                                 .align_y(iced::Alignment::Center)
