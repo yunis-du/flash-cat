@@ -222,7 +222,7 @@ impl FlashCatReceiver {
                         encrypted_share_code: encryptor.encrypt_share_code_bytes(),
                     })
                     .await?;
-                    continue;
+                    return Ok(());
                 }
                 // Send periodic pings to the relay.
                 _ = ping_interval.tick() => {

@@ -106,6 +106,8 @@ async fn send(send_cmd: SendCmd) -> Result<()> {
     };
 
     tokio::try_join!(send_task, signals_task)?;
+    // Ensure that the channel is closed
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     Ok(())
 }
 
@@ -157,6 +159,8 @@ async fn recv(recv_cmd: RecvCmd) -> Result<()> {
     };
 
     tokio::try_join!(receive_task, signals_task)?;
+    // Ensure that the channel is closed
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     Ok(())
 }
 
