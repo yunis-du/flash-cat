@@ -433,6 +433,7 @@ impl FlashCatReceiver {
                                 .await?;
                             }
                             SenderMessage::FileDone(file_done) => {
+                                recv_files.remove(&file_done.file_id); // drop file recycle file descriptors
                                 Self::send_msg_to_stream(
                                     receiver_stream_tx,
                                     ReceiverInteractionMessage::FileProgressFinish(
