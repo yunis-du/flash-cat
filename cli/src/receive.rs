@@ -36,18 +36,20 @@ impl Receive {
     }
 
     pub async fn run(&self) -> Result<()> {
-        let mut stream = Arc::new(self.receiver.clone()).start().await?;
+        let mut stream = Arc::new(self.receiver.clone()).start().await.map_err(|e| {
+            if e.to_string().contains("NotFound") {
+                anyhow::Error::msg("Not found, Please check share code.")
+            } else {
+                anyhow::Error::msg(format!("An error occurred: {}", e.to_string()))
+            }
+        })?;
         let mut progress = Progress::new(1, 10);
         while !self.shutdown.is_terminated() {
             if let Some(receiver_msg) = stream.next().await {
                 match receiver_msg {
                     ReceiverInteractionMessage::Message(msg) => println!("{msg}"),
                     ReceiverInteractionMessage::Error(e) => {
-                        if e.contains("NotFound") {
-                            println!("Not found, Please check share code.");
-                        } else {
-                            println!("An error occurred: {}", e.to_string());
-                        }
+                        println!("An error occurred: {}", e.to_string());
                         self.shutdown();
                     }
                     ReceiverInteractionMessage::SendFilesRequest(send_req) => {
