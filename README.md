@@ -23,12 +23,15 @@ sudo curl -o /etc/yum.repos.d/flash-cat.repo http://repo.duyunzhi.cn/rpm/flash-c
 ```
 
 ### Use apt-get install
+Systems for apt package manager-based (such as Debian, Ubuntu, and their derivatives).
 
 ```bash
 echo "deb [trusted=yes] http://repo.duyunzhi.cn/apt/ flash-cat main" | sudo tee /etc/apt/sources.list.d/flash-cat.list && sudo apt-get update && sudo apt-get install flash-cat
 ```
 
 ### On macOS you can install the latest release with Homebrew
+For macOS, use Homebrew package Manager to install the latest version of flash-cat.
+
 ```bash
 brew tap yunis-du/brew
 brew install flash-cat
