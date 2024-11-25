@@ -3,6 +3,7 @@ name = "flash_cat_cli"
 authors.workspace = true
 license.workspace = true
 version.workspace = true
+description.workspace = true
 edition.workspace = true
 repository.workspace = true
 rust-version.workspace = true
@@ -27,3 +28,52 @@ indicatif.workspace = true
 
 [build-dependencies]
 built.workspace = true
+
+[package.metadata.generate-rpm.variants.x86_64-unknown-linux-musl]
+name = "flash-cat"
+release = "1.el7"
+description = "Securely send the file folder from one computer to another computer."
+license = "MIT"
+maintainer = "Yunis <yunis@88.com>"
+url = "https://github.com/yunis-du/flash-cat"
+assets = [
+    # binary
+    { source = "target/x86_64-unknown-linux-musl/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
+]
+
+[package.metadata.generate-rpm.variants.aarch64-unknown-linux-musl]
+name = "flash-cat"
+release = "1.el7"
+description = "Securely send the file folder from one computer to another computer."
+license = "MIT"
+maintainer = "Yunis <yunis@88.com>"
+url = "https://github.com/yunis-du/flash-cat"
+assets = [
+    # binary
+    { source = "target/aarch64-unknown-linux-musl/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
+]
+
+[package.metadata.generate-rpm.requires]
+CompressedFileNames = "<= 3.0.4-1"
+
+[package.metadata.deb.variants.x86_64-unknown-linux-musl]
+name = "flash-cat"
+maintainer = "Yunis <yunis@88.com>"
+license-file = ["../LICENSE", "4"]
+extended-description = "Securely send the file folder from one computer to another computer."
+section = "main"
+assets = [
+    # binary
+    { source = "../target/x86_64-unknown-linux-musl/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
+]
+
+[package.metadata.deb.variants.aarch64-unknown-linux-musl]
+name = "flash-cat"
+maintainer = "Yunis <yunis@88.com>"
+license-file = ["../LICENSE", "4"]
+extended-description = "Securely send the file folder from one computer to another computer."
+section = "main"
+assets = [
+    # binary
+    { source = "../target/aarch64-unknown-linux-musl/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
+]

@@ -5,6 +5,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     tonic_build::configure()
         .file_descriptor_set_path(descriptor_path)
         .bytes(["."])
-        .compile(&["proto/relay.proto"], &["proto/"])?;
+        .compile_protos(&["proto/relay.proto"], &["proto/"])?;
     Ok(())
 }

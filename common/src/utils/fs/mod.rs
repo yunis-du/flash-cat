@@ -11,7 +11,7 @@ use anyhow::Result;
 #[cfg(feature = "progress")]
 use indicatif::{ProgressBar, ProgressStyle};
 use walkdir::WalkDir;
-use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
+use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::Shutdown;
 
@@ -208,7 +208,7 @@ pub fn zip_folder<P: AsRef<Path>>(file_name: String, path: P, shutdown: Shutdown
 
     let file = File::create(file_name.as_str())?;
     let mut zip = ZipWriter::new(file);
-    let options = FileOptions::default()
+    let options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Bzip2)
         .unix_permissions(0o755);
 

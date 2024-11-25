@@ -3,6 +3,7 @@ name = "flash_cat_app"
 authors.workspace = true
 license.workspace = true
 version.workspace = true
+description.workspace = true
 edition.workspace = true
 repository.workspace = true
 rust-version.workspace = true
@@ -22,10 +23,10 @@ serde.workspace = true
 log.workspace = true
 tokio.workspace = true
 indicatif.workspace = true
-iced = { version = "0.13.1", features = ["image", "svg", "tokio", "wgpu"] }
-iced_aw = "0.11.0"
-webbrowser = "1.0.1"
-rfd = "0.14.1"
+iced = { version = "0.13", features = ["image", "svg", "tokio", "wgpu"] }
+iced_aw = "0.11"
+webbrowser = "1"
+rfd = "0.15"
 directories = "5.0.1"
 open = "5.3.0"
 toml = "0.8.19"
