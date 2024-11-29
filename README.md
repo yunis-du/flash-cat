@@ -37,6 +37,12 @@ brew tap yunis-du/brew
 brew install flash-cat
 ```
 
+### Or, you can install Cargo and build from source (requires Cargo 1.80+)
+
+```bash
+cargo install --git https://github.com/yunis-du/flash-cat flash_cat_cli
+```
+
 ## Usage
 
 ### simple send and receive
@@ -54,3 +60,4 @@ flash-cat recv xx-xxxx-xxxx
 ```
 
 ## Deployment your owner relay
+...
