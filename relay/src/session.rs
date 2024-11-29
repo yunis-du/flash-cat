@@ -72,7 +72,7 @@ impl Session {
         Ok(())
     }
 
-    pub async fn recv_from_sharet(&self) -> Result<RelayMessage> {
+    pub async fn recv_from_share(&self) -> Result<RelayMessage> {
         Ok(self.user_pair.sharer_update_rx.recv().await?)
     }
 
