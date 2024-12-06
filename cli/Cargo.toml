@@ -31,7 +31,7 @@ built.workspace = true
 
 [package.metadata.generate-rpm.variants.x86_64-unknown-linux-musl]
 name = "flash-cat"
-release = "1.el7"
+release = "1.el8"
 description = "Securely send the file folder from one computer to another computer."
 license = "MIT"
 maintainer = "Yunis <yunis@88.com>"
@@ -43,7 +43,7 @@ assets = [
 
 [package.metadata.generate-rpm.variants.aarch64-unknown-linux-musl]
 name = "flash-cat"
-release = "1.el7"
+release = "1.el8"
 description = "Securely send the file folder from one computer to another computer."
 license = "MIT"
 maintainer = "Yunis <yunis@88.com>"
@@ -53,8 +53,8 @@ assets = [
     { source = "target/aarch64-unknown-linux-musl/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
 ]
 
-[package.metadata.generate-rpm.requires]
-CompressedFileNames = "<= 3.0.4-1"
+# [package.metadata.generate-rpm.requires]
+# CompressedFileNames = "<= 3.0.4-1"
 
 [package.metadata.deb.variants.x86_64-unknown-linux-musl]
 name = "flash-cat"
