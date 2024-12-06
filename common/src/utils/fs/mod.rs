@@ -352,3 +352,14 @@ pub fn is_file<P: AsRef<Path>>(path: P) -> bool {
         false
     }
 }
+
+pub fn reset_path(path: &str) -> String {
+    #[cfg(unix)]
+    {
+        path.replace("\\", "/")
+    }
+    #[cfg(windows)]
+    {
+        path.replace("/", "\\")
+    }
+}

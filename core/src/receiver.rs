@@ -23,6 +23,7 @@ use flash_cat_common::{
         Done, FileConfirm, Id, JoinRequest, ReceiverUpdate, RelayUpdate,
     },
     utils::{
+        fs::reset_path,
         get_time_ms,
         net::{get_domain_ip, net_scout::NetScout},
     },
@@ -316,8 +317,11 @@ impl FlashCatReceiver {
                                         },
                                     )),
                                 });
+
+                                let relative_path = reset_path(new_file_req.relative_path.as_str());
+
                                 let absolute_path = Path::new(OUT_DIR.read().unwrap().as_str())
-                                    .join(new_file_req.relative_path.as_str());
+                                    .join(relative_path.as_str());
                                 if new_file_req.is_empty_dir {
                                     tokio::fs::create_dir_all(&absolute_path).await?;
                                     Self::send_msg_to_relay(&tx, accept_msg).await?;
