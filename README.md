@@ -19,14 +19,14 @@ https://github.com/yunis-du/flash-cat/releases
 Systems for yum package managers, such as CentOS, RockyLinux, etc. Currently, only amd64 and arm64 architectures are supported.
 
 ```bash
-sudo curl -o /etc/yum.repos.d/flash-cat.repo http://repo.duyunzhi.cn/rpm/flash-cat/flash-cat.repo && sudo yum install flash-cat -y
+sudo curl -o /etc/yum.repos.d/flash-cat.repo http://repo.yunisdu.com/rpm/flash-cat/flash-cat.repo && sudo yum install flash-cat -y
 ```
 
 ### Use apt-get install
 Systems for apt package manager-based (such as Debian, Ubuntu, and their derivatives).
 
 ```bash
-echo "deb [trusted=yes] http://repo.duyunzhi.cn/apt/ flash-cat main" | sudo tee /etc/apt/sources.list.d/flash-cat.list && sudo apt-get update && sudo apt-get install flash-cat
+echo "deb [trusted=yes] http://repo.yunisdu.com/apt/ flash-cat main" | sudo tee /etc/apt/sources.list.d/flash-cat.list && sudo apt-get update && sudo apt-get install flash-cat
 ```
 
 ### On macOS you can install the latest release with Homebrew

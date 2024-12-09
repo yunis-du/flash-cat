@@ -34,7 +34,7 @@ struct SendCmd {
     #[clap(long)]
     zip: bool,
 
-    /// Relay address (default: public relay [https://flashcat.duyunzhi.cn])
+    /// Relay address (default: public relay [https://flashcat.yunisdu.com])
     #[clap(long)]
     relay: Option<String>,
 
@@ -49,7 +49,7 @@ struct RecvCmd {
     #[clap(required = true, num_args = 1)]
     share_code: String,
 
-    /// Relay address (default: public relay [https://flashcat.duyunzhi.cn])
+    /// Relay address (default: public relay [https://flashcat.yunisdu.com])
     #[clap(long)]
     relay: Option<String>,
 
