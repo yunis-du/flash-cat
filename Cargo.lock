@@ -1530,7 +1530,7 @@ dependencies = [
 
 [[package]]
 name = "flash_cat_cli"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "built",
@@ -1546,7 +1546,7 @@ dependencies = [
 
 [[package]]
 name = "flash_cat_common"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1568,7 +1568,7 @@ dependencies = [
 
 [[package]]
 name = "flash_cat_core"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "async-channel",
