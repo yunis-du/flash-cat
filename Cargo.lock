@@ -1509,7 +1509,7 @@ checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
 name = "flash_cat_app"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "built",

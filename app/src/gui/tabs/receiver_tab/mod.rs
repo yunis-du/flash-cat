@@ -316,9 +316,9 @@ impl ReceiverTab {
                 row![text(err).style(styles::text_styles::red_text_theme)]
             }
             ReceiverNotification::Confirm(confirm_type, confirm_msg) => row![
-                text(confirm_msg.clone())
+                text(confirm_msg)
                     .style(styles::text_styles::accent_color_theme)
-                    .width(Length::Fixed(390.0)),
+                    .width(Length::Fixed(350.0)),
                 horizontal_space(),
                 button("Yes").on_press(Message::Confirm(confirm_type.clone(), true)),
                 button("No").on_press(Message::Confirm(confirm_type.clone(), false)),

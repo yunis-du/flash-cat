@@ -54,10 +54,10 @@ pub fn run(fcs: Arc<FlashCatSender>) -> impl Stream<Item = Result<(u64, Progress
                         "Send files done. Waiting for the receiver to receive finish..."
                             .to_string(),
                     );
-                    let _ = sender.send((0, Progress::None)).await;
+                    let _ = sender.send((0, Progress::Done)).await;
                 }
                 SenderInteractionMessage::Completed => {
-                    let _ = sender.send((0, Progress::None)).await;
+                    let _ = sender.send((0, Progress::Done)).await;
                 }
             }
         }
@@ -72,6 +72,7 @@ pub enum Progress {
     Sent(f32),
     Finished,
     Skip,
+    Done,
 }
 
 #[derive(Debug, Clone)]

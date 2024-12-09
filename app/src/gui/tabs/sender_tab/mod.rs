@@ -290,13 +290,19 @@ impl SenderTab {
                 Ok((file_id, progress)) => {
                     let new_state = match progress {
                         sender::Progress::Sent(sent) => {
-                            if !SENDER_STATE.read().unwrap().eq(&SenderState::Sending) {
+                            if SENDER_STATE.read().unwrap().ne(&SenderState::Sending)
+                                && SENDER_STATE.read().unwrap().ne(&SenderState::SendDone)
+                            {
                                 *SENDER_STATE.write().unwrap() = SenderState::Sending;
                             }
                             Some(ProgressBarState::Progress(sent))
                         }
                         sender::Progress::Finished => Some(ProgressBarState::Finished),
                         sender::Progress::Skip => Some(ProgressBarState::Skip),
+                        sender::Progress::Done => {
+                            *SENDER_STATE.write().unwrap() = SenderState::SendDone;
+                            None
+                        }
                         _ => None,
                     };
                     let progress_bar = self
