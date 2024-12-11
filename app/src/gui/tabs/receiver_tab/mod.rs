@@ -305,7 +305,6 @@ impl ReceiverTab {
             recv_button = recv_button.on_press(Message::RecvDone);
         }
 
-
         let receiver_notification = RECEIVER_NOTIFICATION.read().unwrap();
         let notification = match receiver_notification.clone() {
             ReceiverNotification::Normal => row![],

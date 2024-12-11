@@ -1,6 +1,7 @@
+use std::{future::Future, net::SocketAddr};
+
 use anyhow::Result;
 use log::info;
-use std::{future::Future, net::SocketAddr};
 
 pub mod grpc;
 pub mod listen;

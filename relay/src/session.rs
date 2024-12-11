@@ -1,8 +1,9 @@
+use std::time::Instant;
+
 use anyhow::Result;
 use bytes::Bytes;
 use flash_cat_common::{proto::relay_update::RelayMessage, Shutdown};
 use parking_lot::Mutex;
-use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub struct Metadata {

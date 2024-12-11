@@ -1,13 +1,14 @@
+use std::net::{IpAddr, SocketAddr};
+
 use anyhow::Result;
 use clap::Parser;
 use flash_cat_common::{init_logger, VersionInfo, RELAY_VERSION};
 use flash_cat_relay::{built_info, relay::Relay};
 use log::{error, info};
-use std::net::{IpAddr, SocketAddr};
-#[cfg(unix)]
-use tokio::signal::unix::{signal, SignalKind};
 #[cfg(windows)]
 use tokio::signal::ctrl_c;
+#[cfg(unix)]
+use tokio::signal::unix::{signal, SignalKind};
 
 #[derive(Parser, Debug)]
 #[clap(name = "flash-cat-relay")]

@@ -1,3 +1,5 @@
+use std::{net::SocketAddr, path::Path, pin::Pin, sync::Arc, time::Duration};
+
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use flash_cat_common::{
@@ -17,7 +19,6 @@ use flash_cat_common::{
     Shutdown,
 };
 use flash_cat_relay::run_relay;
-use std::{net::SocketAddr, path::Path, pin::Pin, sync::Arc, time::Duration};
 use tokio::{fs::File, io::AsyncReadExt, sync::mpsc, time::MissedTickBehavior};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tonic::transport::Endpoint;

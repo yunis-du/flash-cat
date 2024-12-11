@@ -8,7 +8,7 @@ use general_widget::{General, Message as GeneralMessage};
 use iced::{
     widget::scrollable::{RelativeOffset, Viewport},
     widget::{column, scrollable},
-    Task, Element,
+    Element, Task,
 };
 use iced::{Alignment, Length};
 
@@ -55,7 +55,7 @@ impl SettingsTab {
             Message::General(message) => {
                 self.general_settings.update(message).map(Message::General)
             }
-            Message::About(message) => {self.about.update(message).map(Message::About)},
+            Message::About(message) => self.about.update(message).map(Message::About),
             Message::PageScrolled(view_port) => {
                 self.scrollable_offset = view_port.relative_offset();
                 Task::none()
@@ -102,12 +102,12 @@ impl Tab for SettingsTab {
 }
 
 pub mod settings_config {
-    use flash_cat_common::consts::PUBLIC_RELAY;
     use std::{
         io::ErrorKind,
         sync::{Arc, LazyLock, RwLock},
     };
 
+    use flash_cat_common::consts::PUBLIC_RELAY;
     use log::{error, info, warn};
     use serde::{Deserialize, Serialize};
 
