@@ -219,7 +219,6 @@ impl FlashCatReceiver {
                 Endpoint::from_shared(format!("http://{}:{}", relay.relay_ip, relay.relay_port))?;
         }
 
-        println!("endpoint: {}", endpoint.uri()); // TODO: remove
         let encryptor = self.encryptor.clone();
         let confirm_rx = self.confirm_rx.clone();
         tokio::spawn(async move {
