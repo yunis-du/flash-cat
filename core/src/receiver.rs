@@ -83,21 +83,36 @@ impl FlashCatReceiver {
                 Err(_) => specify_relay,
             };
             let endpoint = Endpoint::from_shared(specify_relay_addr)?;
-            self.connect_relay(endpoint, receiver_stream_tx.clone(), self.shutdown.clone())
-                .await?;
+            self.connect_relay(
+                endpoint,
+                receiver_stream_tx.clone(),
+                false,
+                self.shutdown.clone(),
+            )
+            .await?;
         } else {
             // discovery relay addr
             let relay_addr = self.discovery_relay_addr().await;
             if relay_addr.is_some() {
                 let relay_addr = relay_addr.unwrap();
                 let endpoint = Endpoint::from_shared(format!("http://{relay_addr}"))?;
-                self.connect_relay(endpoint, receiver_stream_tx.clone(), self.shutdown.clone())
-                    .await?;
+                self.connect_relay(
+                    endpoint,
+                    receiver_stream_tx.clone(),
+                    true,
+                    self.shutdown.clone(),
+                )
+                .await?;
             } else {
                 // public relay
                 let endpoint = Endpoint::from_shared(format!("https://{PUBLIC_RELAY}"))?;
-                self.connect_relay(endpoint, receiver_stream_tx.clone(), self.shutdown.clone())
-                    .await?;
+                self.connect_relay(
+                    endpoint,
+                    receiver_stream_tx.clone(),
+                    false,
+                    self.shutdown.clone(),
+                )
+                .await?;
             }
         }
         // resolve shutdown when receiver_stream_rx is no message will cause panic
@@ -134,6 +149,7 @@ impl FlashCatReceiver {
         &self,
         mut endpoint: Endpoint,
         receiver_stream_tx: mpsc::Sender<ReceiverInteractionMessage>,
+        is_discovery: bool,
         shutdown: Shutdown,
     ) -> Result<()> {
         let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
@@ -203,20 +219,24 @@ impl FlashCatReceiver {
             }
         }
 
-        if sender_local_relay.is_some() {
-            let sender_local_relay = sender_local_relay.unwrap();
-            let sender_local_relay_endpoint = Endpoint::from_shared(format!(
-                "http://{}:{}",
-                sender_local_relay.relay_ip, sender_local_relay.relay_port
-            ))?;
+        if !is_discovery {
+            if sender_local_relay.is_some() {
+                let sender_local_relay = sender_local_relay.unwrap();
+                let sender_local_relay_endpoint = Endpoint::from_shared(format!(
+                    "http://{}:{}",
+                    sender_local_relay.relay_ip, sender_local_relay.relay_port
+                ))?;
 
-            if client.peek(Empty {}).await.is_ok() {
-                endpoint = sender_local_relay_endpoint;
+                if client.peek(Empty {}).await.is_ok() {
+                    endpoint = sender_local_relay_endpoint;
+                }
+            } else if relay.is_some() {
+                let relay = relay.unwrap();
+                endpoint = Endpoint::from_shared(format!(
+                    "http://{}:{}",
+                    relay.relay_ip, relay.relay_port
+                ))?;
             }
-        } else if relay.is_some() {
-            let relay = relay.unwrap();
-            endpoint =
-                Endpoint::from_shared(format!("http://{}:{}", relay.relay_ip, relay.relay_port))?;
         }
 
         let encryptor = self.encryptor.clone();

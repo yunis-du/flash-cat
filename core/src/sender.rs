@@ -132,7 +132,7 @@ impl FlashCatSender {
             let endpoint = Endpoint::from_shared(format!("http://127.0.0.1:{local_relay_port}"))?;
             self.connect_relay(
                 RelayType::Local,
-                Some(local_relay_port),
+                None,
                 endpoint,
                 sender_stream_tx.clone(),
                 self.local_relay_shutdown.clone(),
@@ -143,7 +143,7 @@ impl FlashCatSender {
             let endpoint = Endpoint::from_shared(format!("https://{PUBLIC_RELAY}"))?;
             self.connect_relay(
                 RelayType::Public,
-                None,
+                Some(local_relay_port),
                 endpoint,
                 sender_stream_tx.clone(),
                 self.public_relay_shutdown.clone(),

@@ -55,6 +55,8 @@ impl RelayService for GrpcServer {
                     Ok(character) => character,
                     Err(_) => return Err(Status::invalid_argument("unknown character")),
                 };
+                let mut sender_local_relay = None;
+
                 match character {
                     Character::Sender => match self.0.lookup(&session_name) {
                         Some(_) => return Err(Status::already_exists("duplicate session_name")),
@@ -62,6 +64,7 @@ impl RelayService for GrpcServer {
                             debug!("new sharer[{session_name}] incoming");
                             let metadata = Metadata {
                                 encrypted_share_code: id.encrypted_share_code,
+                                sender_local_relay: request.sender_local_relay,
                             };
                             let session = Arc::new(Session::new(metadata));
                             self.0.insert(&session_name, session.clone());
@@ -69,9 +72,12 @@ impl RelayService for GrpcServer {
                     },
                     Character::Receiver => match self.0.lookup(&session_name) {
                         None => return Err(Status::not_found("session not found")),
-                        Some(_) => (),
+                        Some(session) => {
+                            sender_local_relay = session.metadata().sender_local_relay.clone();
+                        }
                     },
                 }
+
                 let relay = match self.0.external_ip() {
                     Some(ip) => Some(RelayInfo {
                         relay_ip: ip.to_string(),
@@ -97,7 +103,7 @@ impl RelayService for GrpcServer {
                 Ok(Response::new(JoinResponse {
                     join_response_message: Some(JoinResponseMessage::Success(JoinSuccess {
                         relay,
-                        sender_local_relay: request.sender_local_relay,
+                        sender_local_relay,
                         client_latest_version,
                     })),
                 }))

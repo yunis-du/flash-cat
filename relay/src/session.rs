@@ -2,13 +2,18 @@ use std::time::Instant;
 
 use anyhow::Result;
 use bytes::Bytes;
-use flash_cat_common::{proto::relay_update::RelayMessage, Shutdown};
+use flash_cat_common::{
+    proto::{relay_update::RelayMessage, RelayInfo},
+    Shutdown,
+};
 use parking_lot::Mutex;
 
 #[derive(Debug, Clone)]
 pub struct Metadata {
     /// Used to validate that clients have the correct encryption share code.
     pub encrypted_share_code: Bytes,
+    /// Local relay info for sender.
+    pub sender_local_relay: Option<RelayInfo>,
 }
 
 #[derive(Debug, Clone)]

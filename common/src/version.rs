@@ -1,8 +1,8 @@
 use std::fmt;
 
-pub const APP_VERSION: &'static str = "2.0.0";
-pub const CLI_VERSION: &'static str = "2.0.0";
-pub const RELAY_VERSION: &'static str = "2.0.0";
+pub const APP_VERSION: &'static str = "2.0.1";
+pub const CLI_VERSION: &'static str = "2.0.1";
+pub const RELAY_VERSION: &'static str = "2.0.1";
 
 pub struct VersionInfo {
     pub name: &'static str,
