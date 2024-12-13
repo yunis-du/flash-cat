@@ -1509,7 +1509,7 @@ checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
 name = "flash_cat_app"
-version = "1.1.2"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "built",
@@ -1530,7 +1530,7 @@ dependencies = [
 
 [[package]]
 name = "flash_cat_cli"
-version = "1.1.2"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "built",
@@ -1546,7 +1546,7 @@ dependencies = [
 
 [[package]]
 name = "flash_cat_common"
-version = "1.1.2"
+version = "2.0.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1568,7 +1568,7 @@ dependencies = [
 
 [[package]]
 name = "flash_cat_core"
-version = "1.1.2"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -1587,7 +1587,7 @@ dependencies = [
 
 [[package]]
 name = "flash_cat_relay"
-version = "1.1.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-channel",

@@ -2,6 +2,9 @@ syntax = "proto3";
 package relay;
 
 service RelayService {
+  // Peek the relay info.
+  rpc Peek(Empty) returns (Empty);
+
   // Join-created relay session.
   rpc Join(JoinRequest) returns (JoinResponse);
 
@@ -12,9 +15,14 @@ service RelayService {
   rpc Close(CloseRequest) returns (CloseResponse);
 }
 
+// Empty message.
+message Empty {}
+
 // Request to open an relay session.
 message JoinRequest {
   Id id = 1;  // Join-created id info.
+  ClientType client_type = 2; // Client type.
+  RelayInfo sender_local_relay = 3; // Local relay info for sender.
 }
 
 // Details of relay session.
@@ -27,12 +35,19 @@ message JoinResponse {
 
 // Join success.
 message JoinSuccess {
-  uint32 relay_port = 1;  // Port of relay.
+  RelayInfo relay = 1;  // Relay info.
+  RelayInfo sender_local_relay = 2; // Local relay info for sender.
+  string client_latest_version = 3; // Latest client version.
 }
 
 // Join failed.
 message JoinFailed {
   string error_msg = 1; // Join failed message.
+}
+
+message RelayInfo {
+  string relay_ip = 1;  // Ip address of relay.
+  uint32 relay_port = 2;  // Port of relay.
 }
 
 // Request to stop a relay session gracefully.
@@ -65,71 +80,91 @@ message Id {
   Character character = 2;         // Character.
 }
 
-message Joined {}
+// Client type.
+enum ClientType {
+  Cli = 0; // CLI client.
+  App = 1; // App client.
+}
 
-message Ready {}
-
+// Character of the client.
 enum Character {
   Sender = 0;     // Character of sharer.
   Receiver = 1;   // Character of recipient.
 }
 
+// Joined.
+message Joined {}
+
+// Ready.
+message Ready {}
+
+// Done.
 message Done {}
 
+// Terminated.
 message Terminated {}
 
+// Sender update.
 message SenderUpdate {
   oneof sender_message {
-    SendRequest send_request = 1;
-    NewFileRequest new_file_request = 3;
-    FileData file_data = 4;
-    FileDone file_done = 5;
+    SendRequest send_request = 1; // Send request.
+    NewFileRequest new_file_request = 2; // New file request.
+    FileData file_data = 3; // File data.
+    FileDone file_done = 4; // File done.
   }
 }
 
+// Send request.
 message SendRequest {
-  uint64 total_size = 1;
-  uint64 num_files = 2;
-  uint64 num_folders = 3;
-  uint64 max_file_name_length = 4;
+  uint64 total_size = 1; // Total size.
+  uint64 num_files = 2; // Number of files.
+  uint64 num_folders = 3; // Number of folders.
+  uint64 max_file_name_length = 4; // Maximum file name length.
 }
 
+// New file request.
 message NewFileRequest {
-  uint64 file_id = 1;
-  string filename = 2;
-  uint32 file_mode = 3;
-  string relative_path = 4;
-  uint64 total_size = 5;
-  bool is_empty_dir = 6;
+  uint64 file_id = 1; // File id.
+  string filename = 2; // File name.
+  uint32 file_mode = 3; // File mode.
+  string relative_path = 4; // Relative path.
+  uint64 total_size = 5; // Total size.
+  bool is_empty_dir = 6; // Whether it is an empty directory.
 }
 
+// File data.
 message FileData {
-  uint64 file_id = 1;
-  bytes data = 2;
+  uint64 file_id = 1; // File id.
+  bytes data = 2; // File data.
 }
 
+// File done.
 message FileDone {
-  uint64 file_id = 1;
+  uint64 file_id = 1; // File id.
 }
 
+// Receiver update.
 message ReceiverUpdate {
   oneof receiver_message {
-    Confirm share_confirm = 1;
-    FileConfirm new_file_confirm = 2;
+    Confirm share_confirm = 1; // Share confirm.
+    FileConfirm new_file_confirm = 2; // New file confirm.
   }
 }
 
+// File confirm.
 message FileConfirm {
-  uint64 file_id = 1;
-  Confirm confirm = 2;
+  uint64 file_id = 1; // File id.
+  Confirm confirm = 2; // Confirm.
 }
 
+// Confirm.
 enum Confirm {
-  Accept = 0;
-  Reject = 1;
+  Accept = 0; // Accept.
+  Reject = 1; // Reject.
 }
 
+// File result.
 message FileResult {
-  int32 file_id = 1;
+  int32 file_id = 1; // File id.
   int32 status = 2; // The status of file transfer, 0 is success other is failed.
 }

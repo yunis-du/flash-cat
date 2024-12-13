@@ -13,7 +13,7 @@ pub mod built_info {
 }
 
 pub async fn run_relay(addr: SocketAddr, signal: impl Future<Output = ()>) -> Result<()> {
-    let relay = relay::Relay::new()?;
+    let relay = relay::Relay::new(None)?;
 
     let relay_task = async {
         info!("relay listening at {addr}");

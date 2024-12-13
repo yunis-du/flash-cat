@@ -3,20 +3,21 @@ use std::{net::SocketAddr, path::Path, pin::Pin, sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use flash_cat_common::{
+    compare_versions,
     consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY},
     crypt::encryptor::Encryptor,
     proto::{
         join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
-        relay_update::RelayMessage, sender_update::SenderMessage, Character, CloseRequest, Confirm,
-        Done, FileConfirm, FileData, FileDone, Id, JoinRequest, NewFileRequest, RelayUpdate,
-        SendRequest, SenderUpdate,
+        relay_update::RelayMessage, sender_update::SenderMessage, Character, ClientType,
+        CloseRequest, Confirm, Done, FileConfirm, FileData, FileDone, Id, JoinRequest,
+        NewFileRequest, RelayInfo, RelayUpdate, SendRequest, SenderUpdate,
     },
     utils::{
         fs::{collect_files, is_idr, paths_exist, remove_files, zip_folder, FileCollector},
         get_time_ms,
-        net::{find_available_port, get_domain_ip, net_scout::NetScout},
+        net::{find_available_port, get_local_ip, net_scout::NetScout},
     },
-    Shutdown,
+    Shutdown, APP_VERSION, CLI_VERSION,
 };
 use flash_cat_relay::run_relay;
 use tokio::{fs::File, io::AsyncReadExt, sync::mpsc, time::MissedTickBehavior};
@@ -39,6 +40,7 @@ pub struct FlashCatSender {
     file_collector: Arc<FileCollector>,
     local_relay_shutdown: Shutdown,
     public_relay_shutdown: Shutdown,
+    client_type: ClientType,
     shutdown: Shutdown,
 }
 
@@ -48,6 +50,7 @@ impl FlashCatSender {
         specify_relay: Option<String>,
         mut files: Vec<String>,
         zip_floder: bool,
+        client_type: ClientType,
     ) -> Result<Self> {
         paths_exist(files.as_slice())?;
         let shutdown = Shutdown::new();
@@ -66,6 +69,7 @@ impl FlashCatSender {
             file_collector: Arc::new(file_collector),
             local_relay_shutdown: Shutdown::new(),
             public_relay_shutdown: Shutdown::new(),
+            client_type,
             shutdown,
         })
     }
@@ -74,6 +78,7 @@ impl FlashCatSender {
         share_code: String,
         specify_relay: Option<String>,
         file_collector: FileCollector,
+        client_type: ClientType,
     ) -> Result<Self> {
         let shutdown = Shutdown::new();
         let encryptor = Arc::new(Encryptor::new(share_code)?);
@@ -84,6 +89,7 @@ impl FlashCatSender {
             file_collector: Arc::new(file_collector),
             local_relay_shutdown: Shutdown::new(),
             public_relay_shutdown: Shutdown::new(),
+            client_type,
             shutdown,
         })
     }
@@ -103,6 +109,7 @@ impl FlashCatSender {
             let endpoint = Endpoint::from_shared(specify_relay_addr)?;
             self.connect_relay(
                 RelayType::Specify,
+                None,
                 endpoint,
                 sender_stream_tx.clone(),
                 self.shutdown.clone(),
@@ -125,6 +132,7 @@ impl FlashCatSender {
             let endpoint = Endpoint::from_shared(format!("http://127.0.0.1:{local_relay_port}"))?;
             self.connect_relay(
                 RelayType::Local,
+                Some(local_relay_port),
                 endpoint,
                 sender_stream_tx.clone(),
                 self.local_relay_shutdown.clone(),
@@ -135,6 +143,7 @@ impl FlashCatSender {
             let endpoint = Endpoint::from_shared(format!("https://{PUBLIC_RELAY}"))?;
             self.connect_relay(
                 RelayType::Public,
+                None,
                 endpoint,
                 sender_stream_tx.clone(),
                 self.public_relay_shutdown.clone(),
@@ -200,41 +209,100 @@ impl FlashCatSender {
     async fn connect_relay(
         &self,
         relay_type: RelayType,
+        local_relay_port: Option<u16>,
         mut endpoint: Endpoint,
         sender_stream_tx: mpsc::Sender<SenderInteractionMessage>,
         shutdown: Shutdown,
     ) -> Result<()> {
         let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
 
-        let resp = client
+        let sender_local_relay = if relay_type == RelayType::Public && local_relay_port.is_some() {
+            match get_local_ip() {
+                Some(ip) => Some(RelayInfo {
+                    relay_ip: ip.to_string(),
+                    relay_port: local_relay_port.unwrap() as u32,
+                }),
+                None => None,
+            }
+        } else {
+            None
+        };
+
+        let resp = match client
             .join(JoinRequest {
                 id: Some(Id {
                     encrypted_share_code: self.encryptor.encrypt_share_code_bytes(),
                     character: Character::Sender.into(),
                 }),
+                client_type: self.client_type.into(),
+                sender_local_relay,
             })
-            .await?;
+            .await
+        {
+            Ok(resp) => resp,
+            Err(status) => {
+                let _ = Self::send_msg_to_stream(
+                    &sender_stream_tx,
+                    SenderInteractionMessage::RelayFailed((
+                        relay_type,
+                        status.message().to_string(),
+                    )),
+                )
+                .await;
+                return Ok(());
+            }
+        };
 
-        let relay_port =
+        let (relay, client_latest_version) =
             if let Some(join_response_message) = resp.into_inner().join_response_message {
                 match join_response_message {
                     join_response::JoinResponseMessage::Success(join_success) => {
-                        join_success.relay_port
+                        (join_success.relay, join_success.client_latest_version)
                     }
                     join_response::JoinResponseMessage::Failed(join_failed) => {
                         return Err(anyhow::Error::msg(join_failed.error_msg))
                     }
                 }
             } else {
-                return Err(anyhow::Error::msg("can't get relay port"));
+                return Err(anyhow::Error::msg("can't get relay info"));
             };
 
-        let relay_uri = endpoint.uri().to_string();
-        let relay_ip = get_domain_ip(relay_uri.as_str());
-        if relay_port != 0 && relay_ip.is_some() {
-            // Directly connect to Relay, improve performance
-            endpoint =
-                Endpoint::from_shared(format!("http://{}:{}", relay_ip.unwrap(), relay_port))?;
+        match self.client_type {
+            ClientType::Cli => {
+                if compare_versions(client_latest_version.as_str(), CLI_VERSION)
+                    == std::cmp::Ordering::Less
+                {
+                    let _ = sender_stream_tx
+                        .send(SenderInteractionMessage::Message(format!(
+                            "newly cli version[{}] is available",
+                            client_latest_version
+                        )))
+                        .await;
+                }
+            }
+            ClientType::App => {
+                if compare_versions(client_latest_version.as_str(), APP_VERSION)
+                    == std::cmp::Ordering::Less
+                {
+                    let _ = sender_stream_tx
+                        .send(SenderInteractionMessage::Message(format!(
+                            "newly app version[{}] is available",
+                            client_latest_version
+                        )))
+                        .await;
+                }
+            }
+        }
+
+        match relay {
+            Some(relay_info) => {
+                // Directly connect to Relay, improve performance
+                endpoint = Endpoint::from_shared(format!(
+                    "http://{}:{}",
+                    relay_info.relay_ip, relay_info.relay_port
+                ))?;
+            }
+            None => (),
         }
 
         let encryptor = self.encryptor.clone();

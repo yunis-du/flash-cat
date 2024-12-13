@@ -8,10 +8,12 @@ use tonic::{Request, Response, Status, Streaming};
 use flash_cat_common::{
     proto::{
         join_response::JoinResponseMessage, relay_service_server::RelayService,
-        relay_update::RelayMessage, Character, CloseRequest, CloseResponse, JoinFailed,
-        JoinRequest, JoinResponse, JoinSuccess, Joined, Ready, RelayUpdate, Terminated,
+        relay_update::RelayMessage, Character, ClientType, CloseRequest, CloseResponse, Empty,
+        JoinFailed, JoinRequest, JoinResponse, JoinSuccess, Joined, Ready, RelayInfo, RelayUpdate,
+        Terminated,
     },
-    utils::get_time_ms,
+    utils::{get_time_ms, net::get_local_ip},
+    APP_VERSION, CLI_VERSION,
 };
 
 use crate::{
@@ -33,6 +35,10 @@ type RR<T> = Result<Response<T>, Status>;
 #[tonic::async_trait]
 impl RelayService for GrpcServer {
     type ChannelStream = ReceiverStream<Result<RelayUpdate, Status>>;
+
+    async fn peek(&self, _: Request<Empty>) -> RR<Empty> {
+        Ok(Response::new(Empty {}))
+    }
 
     async fn join(&self, request: Request<JoinRequest>) -> RR<JoinResponse> {
         let relay_port = match request.local_addr() {
@@ -66,9 +72,33 @@ impl RelayService for GrpcServer {
                         Some(_) => (),
                     },
                 }
+                let relay = match self.0.external_ip() {
+                    Some(ip) => Some(RelayInfo {
+                        relay_ip: ip.to_string(),
+                        relay_port,
+                    }),
+                    None => match get_local_ip() {
+                        Some(ip) => Some(RelayInfo {
+                            relay_ip: ip.to_string(),
+                            relay_port,
+                        }),
+                        None => None,
+                    },
+                };
+
+                let client_latest_version = match ClientType::try_from(request.client_type) {
+                    Ok(client_type) => match client_type {
+                        ClientType::Cli => CLI_VERSION.to_string(),
+                        ClientType::App => APP_VERSION.to_string(),
+                    },
+                    Err(_) => "".to_string(),
+                };
+
                 Ok(Response::new(JoinResponse {
                     join_response_message: Some(JoinResponseMessage::Success(JoinSuccess {
-                        relay_port,
+                        relay,
+                        sender_local_relay: request.sender_local_relay,
+                        client_latest_version,
                     })),
                 }))
             }
@@ -98,7 +128,7 @@ impl RelayService for GrpcServer {
                     Err(_) => return Err(Status::invalid_argument("unknown character")),
                 };
                 let session = match self.0.lookup(&session_name) {
-                    None => return Err(Status::not_found("session not found")),
+                    None => return Err(Status::not_found("Not found, Please check share code.")),
                     Some(session) => session,
                 };
                 send_msg(&tx, RelayMessage::Joined(Joined {})).await;

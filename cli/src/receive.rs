@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
-use flash_cat_common::Shutdown;
+use flash_cat_common::{proto::ClientType, Shutdown};
 use flash_cat_core::{receiver::FlashCatReceiver, ReceiverConfirm, ReceiverInteractionMessage};
 use indicatif::HumanBytes;
 use tokio_stream::StreamExt;
@@ -27,7 +27,7 @@ impl Receive {
         output: Option<String>,
         assumeyes: bool,
     ) -> Result<Self> {
-        let receiver = FlashCatReceiver::new(share_code, specify_relay, output)?;
+        let receiver = FlashCatReceiver::new(share_code, specify_relay, output, ClientType::Cli)?;
         Ok(Self {
             receiver,
             assumeyes,

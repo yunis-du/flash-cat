@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::Result;
-use flash_cat_common::{utils::gen_share_code, Shutdown};
+use flash_cat_common::{proto::ClientType, utils::gen_share_code, Shutdown};
 use flash_cat_core::{sender::FlashCatSender, RelayType, SenderInteractionMessage};
 use tokio_stream::StreamExt;
 
@@ -37,7 +37,8 @@ impl Send {
             })
             .collect::<Vec<_>>();
         let share_code = gen_share_code();
-        let sender = FlashCatSender::new(share_code.clone(), relay, files, zip).await?;
+        let sender =
+            FlashCatSender::new(share_code.clone(), relay, files, zip, ClientType::Cli).await?;
         Ok(Self {
             share_code,
             sender,

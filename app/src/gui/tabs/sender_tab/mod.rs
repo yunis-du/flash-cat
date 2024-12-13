@@ -35,6 +35,7 @@ use crate::{
 };
 use flash_cat_common::{
     consts::PUBLIC_RELAY,
+    proto::ClientType,
     utils::{
         fs::{collect_files, FileCollector},
         gen_share_code,
@@ -202,6 +203,7 @@ impl SenderTab {
                         self.share_code.clone(),
                         specify_relay,
                         self.fc.clone().unwrap(),
+                        ClientType::App,
                     );
                     match fcs {
                         Ok(fcs) => {

@@ -1,6 +1,6 @@
 [package]
 name = "flash_cat_app"
-version = "1.1.2"
+version.workspace = true
 authors.workspace = true
 license.workspace = true
 description.workspace = true

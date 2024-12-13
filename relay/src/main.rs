@@ -14,12 +14,16 @@ use tokio::signal::unix::{signal, SignalKind};
 #[clap(name = "flash-cat-relay")]
 struct Cmd {
     /// Which IP address or network interface to listen on.
-    #[clap(long, value_parser, default_value = "::1")]
-    listen: IpAddr,
+    #[clap(long, value_parser, default_value = "0.0.0.0")]
+    ip: IpAddr,
 
     /// Relay port
     #[clap(short = 'p', long, default_value = "6880")]
     port: u16,
+
+    /// External access address.
+    #[clap(long, value_parser)]
+    external_ip: Option<IpAddr>,
 
     /// Log file path of the relay server.
     #[clap(
@@ -46,7 +50,7 @@ const VERSION_INFO: &'static VersionInfo = &VersionInfo {
 };
 
 #[tokio::main]
-async fn start(addr: SocketAddr) -> Result<()> {
+async fn start(addr: SocketAddr, external_ip: Option<IpAddr>) -> Result<()> {
     #[cfg(unix)]
     let mut sigterm = signal(SignalKind::terminate())?;
     #[cfg(unix)]
@@ -54,7 +58,7 @@ async fn start(addr: SocketAddr) -> Result<()> {
     #[cfg(windows)]
     let sigint = ctrl_c();
 
-    let relay = Relay::new()?;
+    let relay = Relay::new(external_ip)?;
 
     let relay_task = async {
         info!("relay listening at {addr}");
@@ -96,8 +100,8 @@ fn main() -> Result<()> {
         return Ok(());
     }
     init_logger(cmd.log_level, cmd.log_file);
-    let addr = SocketAddr::new(cmd.listen, cmd.port);
-    match start(addr) {
+    let addr = SocketAddr::new(cmd.ip, cmd.port);
+    match start(addr, cmd.external_ip) {
         Ok(()) => Ok(()),
         Err(err) => {
             error!("{err:?}");

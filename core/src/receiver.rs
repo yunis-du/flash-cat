@@ -15,19 +15,17 @@ use tokio_stream::{wrappers::ReceiverStream as TokioReceiverStream, Stream, Stre
 use tonic::transport::Endpoint;
 
 use flash_cat_common::{
+    compare_versions,
     consts::PUBLIC_RELAY,
     crypt::encryptor::Encryptor,
     proto::{
         join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
-        relay_update::RelayMessage, sender_update::SenderMessage, Character, CloseRequest, Confirm,
-        Done, FileConfirm, Id, JoinRequest, ReceiverUpdate, RelayUpdate,
+        relay_update::RelayMessage, sender_update::SenderMessage, Character, ClientType,
+        CloseRequest, Confirm, Done, Empty, FileConfirm, Id, JoinRequest, ReceiverUpdate,
+        RelayUpdate,
     },
-    utils::{
-        fs::reset_path,
-        get_time_ms,
-        net::{get_domain_ip, net_scout::NetScout},
-    },
-    Shutdown,
+    utils::{fs::reset_path, get_time_ms, net::net_scout::NetScout},
+    Shutdown, APP_VERSION, CLI_VERSION,
 };
 
 use crate::{
@@ -46,6 +44,7 @@ pub struct FlashCatReceiver {
     specify_relay: Option<String>,
     confirm_tx: async_channel::Sender<ReceiverConfirm>,
     confirm_rx: async_channel::Receiver<ReceiverConfirm>,
+    client_type: ClientType,
     shutdown: Shutdown,
 }
 
@@ -54,6 +53,7 @@ impl FlashCatReceiver {
         share_code: String,
         specify_relay: Option<String>,
         output: Option<String>,
+        client_type: ClientType,
     ) -> Result<Self> {
         if output.is_some() {
             *OUT_DIR.write().unwrap() = output.unwrap().clone();
@@ -65,6 +65,7 @@ impl FlashCatReceiver {
             specify_relay,
             confirm_tx,
             confirm_rx,
+            client_type,
             shutdown: Shutdown::new(),
         })
     }
@@ -137,21 +138,36 @@ impl FlashCatReceiver {
     ) -> Result<()> {
         let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
 
-        let resp = client
+        let resp = match client
             .join(JoinRequest {
                 id: Some(Id {
                     encrypted_share_code: self.encryptor.encrypt_share_code_bytes(),
                     character: Character::Receiver.into(),
                 }),
+                client_type: self.client_type.into(),
+                sender_local_relay: None,
             })
-            .await?;
+            .await
+        {
+            Ok(resp) => resp,
+            Err(status) => {
+                let _ = Self::send_msg_to_stream(
+                    &receiver_stream_tx,
+                    ReceiverInteractionMessage::Error(status.message().to_string()),
+                )
+                .await;
+                return Ok(());
+            }
+        };
 
-        let relay_port =
+        let (relay, sender_local_relay, client_latest_version) =
             if let Some(join_response_message) = resp.into_inner().join_response_message {
                 match join_response_message {
-                    join_response::JoinResponseMessage::Success(join_success) => {
-                        join_success.relay_port
-                    }
+                    join_response::JoinResponseMessage::Success(join_success) => (
+                        join_success.relay,
+                        join_success.sender_local_relay,
+                        join_success.client_latest_version,
+                    ),
                     join_response::JoinResponseMessage::Failed(join_failed) => {
                         return Err(anyhow::Error::msg(join_failed.error_msg))
                     }
@@ -160,14 +176,50 @@ impl FlashCatReceiver {
                 return Err(anyhow::Error::msg("can't get relay ip and port"));
             };
 
-        let relay_uri = endpoint.uri().to_string();
-        let relay_ip = get_domain_ip(relay_uri.as_str());
-        if relay_port != 0 && relay_ip.is_some() {
-            // Directly connect to Relay, improve performance
-            endpoint =
-                Endpoint::from_shared(format!("http://{}:{}", relay_ip.unwrap(), relay_port))?;
+        match self.client_type {
+            ClientType::Cli => {
+                if compare_versions(client_latest_version.as_str(), CLI_VERSION)
+                    == std::cmp::Ordering::Less
+                {
+                    let _ = receiver_stream_tx
+                        .send(ReceiverInteractionMessage::Message(format!(
+                            "newly cli version[{}] is available",
+                            client_latest_version
+                        )))
+                        .await;
+                }
+            }
+            ClientType::App => {
+                if compare_versions(client_latest_version.as_str(), APP_VERSION)
+                    == std::cmp::Ordering::Less
+                {
+                    let _ = receiver_stream_tx
+                        .send(ReceiverInteractionMessage::Message(format!(
+                            "newly app version[{}] is available",
+                            client_latest_version
+                        )))
+                        .await;
+                }
+            }
         }
 
+        if sender_local_relay.is_some() {
+            let sender_local_relay = sender_local_relay.unwrap();
+            let sender_local_relay_endpoint = Endpoint::from_shared(format!(
+                "http://{}:{}",
+                sender_local_relay.relay_ip, sender_local_relay.relay_port
+            ))?;
+
+            if client.peek(Empty {}).await.is_ok() {
+                endpoint = sender_local_relay_endpoint;
+            }
+        } else if relay.is_some() {
+            let relay = relay.unwrap();
+            endpoint =
+                Endpoint::from_shared(format!("http://{}:{}", relay.relay_ip, relay.relay_port))?;
+        }
+
+        println!("endpoint: {}", endpoint.uri()); // TODO: remove
         let encryptor = self.encryptor.clone();
         let confirm_rx = self.confirm_rx.clone();
         tokio::spawn(async move {

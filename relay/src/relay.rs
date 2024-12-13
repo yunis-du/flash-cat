@@ -1,4 +1,8 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::Result;
 use dashmap::DashMap;
@@ -14,14 +18,20 @@ const DISCONNECTED_SESSION_EXPIRY: Duration = Duration::from_secs(300);
 pub struct RelayOptions {}
 
 pub struct RelayState {
+    external_ip: Option<IpAddr>,
     store: DashMap<String, Arc<Session>>,
 }
 
 impl RelayState {
-    pub fn new() -> Result<Self> {
+    pub fn new(external_ip: Option<IpAddr>) -> Result<Self> {
         Ok(Self {
             store: DashMap::new(),
+            external_ip,
         })
+    }
+
+    pub fn external_ip(&self) -> Option<IpAddr> {
+        self.external_ip
     }
 
     pub fn lookup(&self, name: &str) -> Option<Arc<Session>> {
@@ -80,16 +90,16 @@ pub struct Relay {
 }
 
 impl Relay {
-    pub fn new() -> Result<Self> {
+    pub fn new(external_ip: Option<IpAddr>) -> Result<Self> {
         Ok(Self {
-            state: Arc::new(RelayState::new()?),
+            state: Arc::new(RelayState::new(external_ip)?),
             shutdown: Shutdown::new(),
         })
     }
 
-    pub fn new_with_shutdown(shutdown: Shutdown) -> Result<Self> {
+    pub fn new_with_shutdown(external_ip: Option<IpAddr>, shutdown: Shutdown) -> Result<Self> {
         Ok(Self {
-            state: Arc::new(RelayState::new()?),
+            state: Arc::new(RelayState::new(external_ip)?),
             shutdown,
         })
     }

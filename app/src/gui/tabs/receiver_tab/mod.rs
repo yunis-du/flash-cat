@@ -3,7 +3,7 @@ use std::{
     sync::{atomic::Ordering, Arc, LazyLock, RwLock},
 };
 
-use flash_cat_common::consts::PUBLIC_RELAY;
+use flash_cat_common::{consts::PUBLIC_RELAY, proto::ClientType};
 use flash_cat_core::{receiver::FlashCatReceiver, ReceiverConfirm};
 use iced::{
     font,
@@ -139,7 +139,8 @@ impl ReceiverTab {
                         .download_path
                         .to_owned(),
                 );
-                let fcr = FlashCatReceiver::new(self.share_code.clone(), relay, output);
+                let fcr =
+                    FlashCatReceiver::new(self.share_code.clone(), relay, output, ClientType::App);
                 match fcr {
                     Ok(fcr) => {
                         self.fcr.replace(Arc::new(fcr));
