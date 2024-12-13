@@ -21,8 +21,7 @@ use flash_cat_common::{
     proto::{
         join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
         relay_update::RelayMessage, sender_update::SenderMessage, Character, ClientType,
-        CloseRequest, Confirm, Done, Empty, FileConfirm, Id, JoinRequest, ReceiverUpdate,
-        RelayUpdate,
+        CloseRequest, Confirm, Done, FileConfirm, Id, JoinRequest, ReceiverUpdate, RelayUpdate,
     },
     utils::{fs::reset_path, get_time_ms, net::net_scout::NetScout},
     Shutdown, APP_VERSION, CLI_VERSION,
@@ -220,17 +219,33 @@ impl FlashCatReceiver {
         }
 
         if !is_discovery {
-            if sender_local_relay.is_some() {
+            let sender_local_relay_endpoint = if sender_local_relay.is_some() {
                 let sender_local_relay = sender_local_relay.unwrap();
                 let sender_local_relay_endpoint = Endpoint::from_shared(format!(
                     "http://{}:{}",
                     sender_local_relay.relay_ip, sender_local_relay.relay_port
                 ))?;
 
-                if client.peek(Empty {}).await.is_ok() {
-                    endpoint = sender_local_relay_endpoint;
+                match tokio::time::timeout(Duration::from_secs(1), async move {
+                    if RelayServiceClient::connect(sender_local_relay_endpoint.clone())
+                        .await
+                        .is_ok()
+                    {
+                        Some(sender_local_relay_endpoint)
+                    } else {
+                        None
+                    }
+                })
+                .await
+                {
+                    Ok(sender_local_relay_endpoint) => sender_local_relay_endpoint,
+                    Err(_) => None,
                 }
-            } else if relay.is_some() {
+            } else {
+                None
+            };
+
+            if sender_local_relay_endpoint.is_none() && relay.is_some() {
                 let relay = relay.unwrap();
                 endpoint = Endpoint::from_shared(format!(
                     "http://{}:{}",

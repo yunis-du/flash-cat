@@ -8,9 +8,8 @@ use tonic::{Request, Response, Status, Streaming};
 use flash_cat_common::{
     proto::{
         join_response::JoinResponseMessage, relay_service_server::RelayService,
-        relay_update::RelayMessage, Character, ClientType, CloseRequest, CloseResponse, Empty,
-        JoinFailed, JoinRequest, JoinResponse, JoinSuccess, Joined, Ready, RelayInfo, RelayUpdate,
-        Terminated,
+        relay_update::RelayMessage, Character, ClientType, CloseRequest, CloseResponse, JoinFailed,
+        JoinRequest, JoinResponse, JoinSuccess, Joined, Ready, RelayInfo, RelayUpdate, Terminated,
     },
     utils::{get_time_ms, net::get_local_ip},
     APP_VERSION, CLI_VERSION,
@@ -35,10 +34,6 @@ type RR<T> = Result<Response<T>, Status>;
 #[tonic::async_trait]
 impl RelayService for GrpcServer {
     type ChannelStream = ReceiverStream<Result<RelayUpdate, Status>>;
-
-    async fn peek(&self, _: Request<Empty>) -> RR<Empty> {
-        Ok(Response::new(Empty {}))
-    }
 
     async fn join(&self, request: Request<JoinRequest>) -> RR<JoinResponse> {
         let relay_port = match request.local_addr() {
@@ -71,7 +66,7 @@ impl RelayService for GrpcServer {
                         }
                     },
                     Character::Receiver => match self.0.lookup(&session_name) {
-                        None => return Err(Status::not_found("session not found")),
+                        None => return Err(Status::not_found("Not found, Please check share code.")),
                         Some(session) => {
                             sender_local_relay = session.metadata().sender_local_relay.clone();
                         }

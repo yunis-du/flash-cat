@@ -2,9 +2,6 @@ syntax = "proto3";
 package relay;
 
 service RelayService {
-  // Peek the relay info.
-  rpc Peek(Empty) returns (Empty);
-
   // Join-created relay session.
   rpc Join(JoinRequest) returns (JoinResponse);
 
@@ -14,9 +11,6 @@ service RelayService {
   // Gracefully shut down an existing relay session.
   rpc Close(CloseRequest) returns (CloseResponse);
 }
-
-// Empty message.
-message Empty {}
 
 // Request to open an relay session.
 message JoinRequest {
