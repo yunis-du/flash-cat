@@ -88,7 +88,7 @@ function Write-Error($Message) {
 
 # Get latest release version from GitHub
 function Get-LatestVersion {
-    $repo = "yuaotian/flash-cat"
+    $repo = "yunis-du/flash-cat"
     $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
     return $release.tag_name
 }
@@ -101,7 +101,7 @@ function Write-Log {
     )
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $logMessage = "[$timestamp] [$Level] $Message"
-    $logFile = "$env:TEMP\cursor-id-modifier-install.log"
+    $logFile = "$env:TEMP\flash-cat-install.log"
     Add-Content -Path $logFile -Value $logMessage
     
     # Output to console

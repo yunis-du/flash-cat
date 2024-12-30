@@ -14,12 +14,12 @@ Securely send the file folder from one computer to another computer.
 
 #### Linux/macOS
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yunis-du/flash-cat/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/yunis-du/flash-cat/master/install.sh | sudo bash
 ```
 
 #### Windows(Run Powershell as Administrator)
 ```powershell
-irm https://raw.githubusercontent.com/yunis-du/flash-cat/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/yunis-du/flash-cat/master/install.ps1 | iex
 ```
 
 ### Use yum install
