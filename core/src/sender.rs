@@ -269,7 +269,7 @@ impl FlashCatSender {
 
         match self.client_type {
             ClientType::Cli => {
-                if compare_versions(client_latest_version.as_str(), CLI_VERSION)
+                if compare_versions(CLI_VERSION, client_latest_version.as_str())
                     == std::cmp::Ordering::Less
                 {
                     let _ = sender_stream_tx
@@ -281,7 +281,7 @@ impl FlashCatSender {
                 }
             }
             ClientType::App => {
-                if compare_versions(client_latest_version.as_str(), APP_VERSION)
+                if compare_versions(APP_VERSION, client_latest_version.as_str())
                     == std::cmp::Ordering::Less
                 {
                     let _ = sender_stream_tx
