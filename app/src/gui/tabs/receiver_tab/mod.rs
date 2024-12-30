@@ -7,7 +7,9 @@ use flash_cat_common::{consts::PUBLIC_RELAY, proto::ClientType};
 use flash_cat_core::{receiver::FlashCatReceiver, ReceiverConfirm};
 use iced::{
     font,
-    widget::{button, column, container, horizontal_space, row, scrollable, text, text_input},
+    widget::{
+        button, checkbox, column, container, horizontal_space, row, scrollable, text, text_input,
+    },
     Element, Font, Length, Task,
 };
 use iced::{
@@ -60,6 +62,7 @@ pub enum ConfirmType {
 pub enum Message {
     PageScrolled(Viewport),
     ShareCodeChanged(String),
+    LanChanged(bool),
     Receive,
     ProgressBar(ProgressBarMessage),
     ReceiveProgressed(Result<(u64, Progress), Error>),
@@ -72,6 +75,7 @@ pub struct ReceiverTab {
     scrollable_offset: RelativeOffset,
     scrollable_id: Id,
     share_code: String,
+    lan: bool,
     fcr: Option<Arc<FlashCatReceiver>>,
     progress_bars: Vec<ProgressBar>,
 }
@@ -83,6 +87,7 @@ impl ReceiverTab {
                 scrollable_offset: RelativeOffset::START,
                 scrollable_id: Self::scrollable_id(),
                 share_code: String::new(),
+                lan: false,
                 fcr: None,
                 progress_bars: vec![],
             },
@@ -119,6 +124,9 @@ impl ReceiverTab {
             Message::ShareCodeChanged(share_code) => {
                 self.share_code = share_code;
             }
+            Message::LanChanged(lan) => {
+                self.lan = lan;
+            }
             Message::Receive => {
                 let settings = SETTINGS.read().unwrap();
 
@@ -139,8 +147,13 @@ impl ReceiverTab {
                         .download_path
                         .to_owned(),
                 );
-                let fcr =
-                    FlashCatReceiver::new(self.share_code.clone(), relay, output, ClientType::App);
+                let fcr = FlashCatReceiver::new(
+                    self.share_code.clone(),
+                    relay,
+                    output,
+                    ClientType::App,
+                    self.lan,
+                );
                 match fcr {
                     Ok(fcr) => {
                         self.fcr.replace(Arc::new(fcr));
@@ -273,6 +286,7 @@ impl ReceiverTab {
             text_input("", &self.share_code)
                 .on_input(Message::ShareCodeChanged)
                 .padding(5),
+            checkbox("LAN", self.lan).on_toggle(|lan| Message::LanChanged(lan))
         ]
         .spacing(5)
         .padding(5)

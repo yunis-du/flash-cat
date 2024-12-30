@@ -28,7 +28,7 @@ use flash_cat_common::{
 };
 
 use crate::{
-    FileDuplication, Progress, ReceiverConfirm, ReceiverInteractionMessage, RecvNewFile,
+    FileDuplication, Progress, ReceiverConfirm, ReceiverInteractionMessage, RecvNewFile, RelayType,
     SendFilesRequest, PING_INTERVAL,
 };
 
@@ -44,6 +44,7 @@ pub struct FlashCatReceiver {
     confirm_tx: async_channel::Sender<ReceiverConfirm>,
     confirm_rx: async_channel::Receiver<ReceiverConfirm>,
     client_type: ClientType,
+    lan: bool,
     shutdown: Shutdown,
 }
 
@@ -53,6 +54,7 @@ impl FlashCatReceiver {
         specify_relay: Option<String>,
         output: Option<String>,
         client_type: ClientType,
+        lan: bool,
     ) -> Result<Self> {
         if output.is_some() {
             *OUT_DIR.write().unwrap() = output.unwrap().clone();
@@ -65,6 +67,7 @@ impl FlashCatReceiver {
             confirm_tx,
             confirm_rx,
             client_type,
+            lan,
             shutdown: Shutdown::new(),
         })
     }
@@ -83,9 +86,9 @@ impl FlashCatReceiver {
             };
             let endpoint = Endpoint::from_shared(specify_relay_addr)?;
             self.connect_relay(
+                RelayType::Specify,
                 endpoint,
                 receiver_stream_tx.clone(),
-                false,
                 self.shutdown.clone(),
             )
             .await?;
@@ -96,9 +99,9 @@ impl FlashCatReceiver {
                 let relay_addr = relay_addr.unwrap();
                 let endpoint = Endpoint::from_shared(format!("http://{relay_addr}"))?;
                 self.connect_relay(
+                    RelayType::Local,
                     endpoint,
                     receiver_stream_tx.clone(),
-                    true,
                     self.shutdown.clone(),
                 )
                 .await?;
@@ -106,9 +109,9 @@ impl FlashCatReceiver {
                 // public relay
                 let endpoint = Endpoint::from_shared(format!("https://{PUBLIC_RELAY}"))?;
                 self.connect_relay(
+                    RelayType::Public,
                     endpoint,
                     receiver_stream_tx.clone(),
-                    false,
                     self.shutdown.clone(),
                 )
                 .await?;
@@ -146,9 +149,9 @@ impl FlashCatReceiver {
 
     async fn connect_relay(
         &self,
+        relay_type: RelayType,
         endpoint: Endpoint,
         receiver_stream_tx: mpsc::Sender<ReceiverInteractionMessage>,
-        is_discovery: bool,
         shutdown: Shutdown,
     ) -> Result<()> {
         let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
@@ -218,7 +221,7 @@ impl FlashCatReceiver {
             }
         }
 
-        let endpoint = if !is_discovery {
+        let endpoint = if relay_type == RelayType::Public && self.lan {
             let sender_local_relay_endpoint = if sender_local_relay.is_some() {
                 let sender_local_relay = sender_local_relay.unwrap();
                 let sender_local_relay_endpoint = Endpoint::from_shared(format!(

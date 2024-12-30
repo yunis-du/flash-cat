@@ -60,6 +60,10 @@ struct RecvCmd {
     /// Automatically answer yes for all questions
     #[clap(short = 'y', long)]
     assumeyes: bool,
+
+    /// Sender is in the same local area network
+    #[clap(short, long)]
+    lan: bool,
 }
 
 const VERSION_INFO: &'static VersionInfo = &VersionInfo {
@@ -131,6 +135,7 @@ async fn recv(recv_cmd: RecvCmd) -> Result<()> {
         recv_cmd.relay,
         recv_cmd.output,
         recv_cmd.assumeyes,
+        recv_cmd.lan,
     )?;
 
     let receive_task = async { receive.run().await };

@@ -26,8 +26,10 @@ impl Receive {
         specify_relay: Option<String>,
         output: Option<String>,
         assumeyes: bool,
+        lan: bool,
     ) -> Result<Self> {
-        let receiver = FlashCatReceiver::new(share_code, specify_relay, output, ClientType::Cli)?;
+        let receiver =
+            FlashCatReceiver::new(share_code, specify_relay, output, ClientType::Cli, lan)?;
         Ok(Self {
             receiver,
             assumeyes,
