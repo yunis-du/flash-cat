@@ -8,13 +8,15 @@ use flash_cat_core::{receiver::FlashCatReceiver, ReceiverConfirm};
 use iced::{
     font,
     widget::{
-        button, checkbox, column, container, horizontal_space, row, scrollable, text, text_input,
+        button, checkbox, column, container, horizontal_space, row, scrollable, svg, text,
+        text_input, tooltip,
     },
     Element, Font, Length, Task,
 };
 use iced::{
     widget::{
         scrollable::{Id, RelativeOffset, Viewport},
+        tooltip::Position,
         Column,
     },
     Alignment,
@@ -23,7 +25,7 @@ use receiver::{recv, Error, Progress, RECV_NUM_FILES};
 
 use super::{settings_tab::settings_config::SETTINGS, Tab};
 use crate::gui::{
-    assets::icons::RECEIVER_ICON,
+    assets::icons::{HELP_ICON, RECEIVER_ICON},
     progress_bar_widget::{Message as ProgressBarMessage, ProgressBar, State as ProgressBarState},
     styles,
 };
@@ -286,7 +288,27 @@ impl ReceiverTab {
             text_input("", &self.share_code)
                 .on_input(Message::ShareCodeChanged)
                 .padding(5),
-            checkbox("LAN", self.lan).on_toggle(|lan| Message::LanChanged(lan))
+        ]
+        .spacing(5)
+        .padding(5)
+        .align_y(iced::Alignment::Center);
+
+        let help_icon = svg(svg::Handle::from_memory(HELP_ICON))
+            .style(styles::svg_styles::colored_svg_theme)
+            .height(20)
+            .width(20);
+
+        let help_tooltip = tooltip(
+            help_icon,
+            "Sender is in the same local area network",
+            Position::FollowCursor,
+        )
+        .gap(10)
+        .style(container::rounded_box);
+
+        let lan_checkbox = row![
+            checkbox("LAN", self.lan).on_toggle(|lan| Message::LanChanged(lan)),
+            help_tooltip,
         ]
         .spacing(5)
         .padding(5)
@@ -343,6 +365,7 @@ impl ReceiverTab {
 
         column![
             share_code_input,
+            lan_checkbox,
             self.progress_view(),
             recv_button,
             notification,

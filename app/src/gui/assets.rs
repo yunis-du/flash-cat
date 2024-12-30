@@ -9,6 +9,7 @@ pub mod icons {
     pub static REMOVE_ICON: &[u8] = include_bytes!("../../assets/icons/remove.svg");
     pub static COPY_ICON: &[u8] = include_bytes!("../../assets/icons/copy.svg");
     pub static TICK_ICON: &[u8] = include_bytes!("../../assets/icons/tick.svg");
+    pub static HELP_ICON: &[u8] = include_bytes!("../../assets/icons/help.svg");
 }
 
 pub mod fonts {
