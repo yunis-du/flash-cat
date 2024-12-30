@@ -44,6 +44,18 @@ brew tap yunis-du/brew
 brew install flash-cat
 ```
 
+### Automatic installation script
+
+#### Linux/macOS
+```bash
+curl -fsSL https://raw.githubusercontent.com/yunis-du/flash-cat/main/install.sh | sudo bash
+```
+
+#### Windows(Run Powershell as Administrator)
+```powershell
+irm https://raw.githubusercontent.com/yunis-du/flash-cat/main/install.ps1 | iex
+```
+
 ### Or, you can install Cargo and build from source (requires Cargo 1.80+)
 
 ```bash
