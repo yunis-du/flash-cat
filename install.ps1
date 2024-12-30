@@ -26,6 +26,7 @@ $EN_MESSAGES = @(
     "Downloading latest release from:",
     "Failed to download binary:",
     "Downloaded file not found",
+    "Download failed",
     "Installing binary...",
     "Failed to install binary:",
     "Adding to PATH...",
@@ -43,6 +44,7 @@ $CN_MESSAGES = @(
     "正在从以下地址下载最新版本：",
     "下载二进制文件失败：",
     "未找到下载的文件",
+    "下载二进制文件失败",
     "正在安装程序...",
     "安装二进制文件失败：",
     "正在添加到PATH...",
@@ -197,7 +199,7 @@ $version = Get-LatestVersion
 Write-Status "$(Get-Message 3) $version"
 
 # Set up paths
-$installDir = "$env:ProgramFiles\flash-cat"
+$installDir = "$env:LOCALAPPDATA\Programs\flash-cat"
 $versionWithoutV = $version.TrimStart('v')  # Remove 'v' prefix from version
 $binaryName = "flash-cat-${versionWithoutV}-x86_64.exe"
 $downloadUrl = "https://github.com/yunis-du/flash-cat/releases/download/$version/$binaryName"
@@ -224,18 +226,24 @@ if (-not (Test-Path $tempFile)) {
     Write-Error (Get-Message 7)
 }
 
+# Verify file size
+$fileSize = (Get-Item $tempFile).Length
+if ($fileSize -eq 0) {
+    Write-Error (Get-Message 8)
+}
+
 # Install binary / 安装二进制文件
-Write-Status (Get-Message 8)
+Write-Status (Get-Message 9)
 try {
     Move-Item -Force $tempFile "$installDir\flash-cat.exe"
 } catch {
-    Write-Error "$(Get-Message 9) $_"
+    Write-Error "$(Get-Message 10) $_"
 }
 
 # Add to PATH if not already present
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($userPath -notlike "*$installDir*") {
-    Write-Status (Get-Message 10)
+    Write-Status (Get-Message 11)
     [Environment]::SetEnvironmentVariable(
         "Path",
         "$userPath;$installDir",
@@ -244,12 +252,11 @@ if ($userPath -notlike "*$installDir*") {
 }
 
 # Cleanup
-Write-Status (Get-Message 11)
+Write-Status (Get-Message 12)
 if (Test-Path $tempFile) {
     Remove-Item -Force $tempFile
 }
 
-Write-Success (Get-Message 12)
 Write-Success (Get-Message 13)
 Write-Host ""
 
