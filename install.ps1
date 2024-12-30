@@ -199,7 +199,7 @@ Write-Status "$(Get-Message 3) $version"
 # Set up paths
 $installDir = "$env:ProgramFiles\flash-cat"
 $versionWithoutV = $version.TrimStart('v')  # Remove 'v' prefix from version
-$binaryName = "flash-cat-cli-windows-${versionWithoutV}-x86_64.zip"
+$binaryName = "flash-cat-${versionWithoutV}-x86_64.exe"
 $downloadUrl = "https://github.com/yunis-du/flash-cat/releases/download/$version/$binaryName"
 $tempFile = "$env:TEMP\$binaryName"
 
@@ -224,33 +224,10 @@ if (-not (Test-Path $tempFile)) {
     Write-Error (Get-Message 7)
 }
 
-# Install binary
+# Install binary / 安装二进制文件
 Write-Status (Get-Message 8)
 try {
-    # Use .NET System.IO.Compression to unzip the file
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $tempExtractPath = "$env:TEMP\flash-cat-extract"
-    
-    # Clean up existing temporary directory
-    if (Test-Path $tempExtractPath) {
-        Remove-Item -Path $tempExtractPath -Recurse -Force
-    }
-    New-Item -ItemType Directory -Path $tempExtractPath -Force | Out-Null
-
-    # Use .NET class to unzip the file
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($tempFile, $tempExtractPath)
-    
-    $extractedBinary = Get-ChildItem -Path $tempExtractPath -Filter "flash-cat.exe" -Recurse | Select-Object -First 1
-    
-    if (-not $extractedBinary) {
-        Write-Error (Get-Message 9)
-    }
-    
-    # Copy to installation directory
-    Copy-Item -Path $extractedBinary.FullName -Destination "$installDir\flash-cat.exe" -Force
-    
-    # Clean up temporary files
-    Remove-Item -Path $tempExtractPath -Recurse -Force
+    Move-Item -Force $tempFile "$installDir\flash-cat.exe"
 } catch {
     Write-Error "$(Get-Message 9) $_"
 }
