@@ -10,9 +10,16 @@ Securely send the file folder from one computer to another computer.
 
 ## Install
 
-### Download for your system
+### Automatic installation script
+
+#### Linux/macOS
 ```bash
-https://github.com/yunis-du/flash-cat/releases
+curl -fsSL https://raw.githubusercontent.com/yunis-du/flash-cat/main/install.sh | sudo bash
+```
+
+#### Windows(Run Powershell as Administrator)
+```powershell
+irm https://raw.githubusercontent.com/yunis-du/flash-cat/main/install.ps1 | iex
 ```
 
 ### Use yum install
