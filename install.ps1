@@ -1,268 +1,186 @@
-# Auto-elevate to admin rights if not already running as admin
-if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
-    Write-Host "Requesting administrator privileges..."
-    $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -ExecutionFromElevated"
-    Start-Process powershell.exe -ArgumentList $arguments -Verb RunAs
-    Exit
+# Check for admin rights and handle elevation
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
+if (-NOT $isAdmin) {
+    # Detect PowerShell version and path
+    $pwshPath = if (Get-Command "pwsh" -ErrorAction SilentlyContinue) {
+        (Get-Command "pwsh").Source  # PowerShell 7+
+    } elseif (Test-Path "$env:ProgramFiles\PowerShell\7\pwsh.exe") {
+        "$env:ProgramFiles\PowerShell\7\pwsh.exe"
+    } else {
+        "powershell.exe"  # Windows PowerShell
+    }
+    
+    try {
+        Write-Host "`nRequesting administrator privileges..." -ForegroundColor Cyan
+        $scriptPath = $MyInvocation.MyCommand.Path
+        $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+        Start-Process -FilePath $pwshPath -Verb RunAs -ArgumentList $argList -Wait
+        exit
+    }
+    catch {
+        Write-Host "`nError: Administrator privileges required" -ForegroundColor Red
+        Write-Host "Please run this script from an Administrator PowerShell window" -ForegroundColor Yellow
+        Write-Host "`nTo do this:" -ForegroundColor Cyan
+        Write-Host "1. Press Win + X" -ForegroundColor White
+        Write-Host "2. Click 'Windows Terminal (Admin)' or 'PowerShell (Admin)'" -ForegroundColor White
+        Write-Host "3. Run the installation command again" -ForegroundColor White
+        Write-Host "`nPress enter to exit..."
+        $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+        exit 1
+    }
 }
 
 # Set TLS to 1.2
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# Colors for output
-$Red = "`e[31m"
-$Green = "`e[32m"
-$Blue = "`e[36m"
-$Yellow = "`e[33m"
-$Reset = "`e[0m"
+# Create temporary directory
+$TmpDir = Join-Path $env:TEMP ([System.Guid]::NewGuid().ToString())
+New-Item -ItemType Directory -Path $TmpDir | Out-Null
 
-# Messages
-$EN_MESSAGES = @(
-    "Starting installation...",
-    "Detected architecture:",
-    "Only 64-bit Windows is supported",
-    "Latest version:",
-    "Creating installation directory...",
-    "Downloading latest release from:",
-    "Failed to download binary:",
-    "Downloaded file not found",
-    "Download failed",
-    "Installing binary...",
-    "Failed to install binary:",
-    "Adding to PATH...",
-    "Cleaning up...",
-    "Installation completed successfully!",
-    "You can now use 'flash-cat' directly"
-)
-
-$CN_MESSAGES = @(
-    "开始安装...",
-    "检测到架构：",
-    "仅支持64位Windows系统",
-    "最新版本：",
-    "正在创建安装目录...",
-    "正在从以下地址下载最新版本：",
-    "下载二进制文件失败：",
-    "未找到下载的文件",
-    "下载二进制文件失败",
-    "正在安装程序...",
-    "安装二进制文件失败：",
-    "正在添加到PATH...",
-    "正在清理...",
-    "安装成功完成！",
-    "现在可以直接使用 'flash-cat' 了"
-)
-
-# Detect system language
-function Get-SystemLanguage {
-    if ((Get-Culture).Name -like "zh-CN") {
-        return "cn"
-    }
-    return "en"
-}
-
-# Get message based on language
-function Get-Message($Index) {
-    $lang = Get-SystemLanguage
-    if ($lang -eq "cn") {
-        return $CN_MESSAGES[$Index]
-    }
-    return $EN_MESSAGES[$Index]
-}
-
-# Functions for colored output
-function Write-Status($Message) {
-    Write-Host "${Blue}[*]${Reset} $Message"
-}
-
-function Write-Success($Message) {
-    Write-Host "${Green}[✓]${Reset} $Message"
-}
-
-function Write-Warning($Message) {
-    Write-Host "${Yellow}[!]${Reset} $Message"
-}
-
-function Write-Error($Message) {
-    Write-Host "${Red}[✗]${Reset} $Message"
-    Exit 1
-}
-
-# Get latest release version from GitHub
-function Get-LatestVersion {
-    $repo = "yunis-du/flash-cat"
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
-    return $release.tag_name
-}
-
-# Add logging function at the beginning of the file
-function Write-Log {
-    param(
-        [string]$Message,
-        [string]$Level = "INFO"
-    )
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "[$timestamp] [$Level] $Message"
-    $logFile = "$env:TEMP\flash-cat-install.log"
-    Add-Content -Path $logFile -Value $logMessage
-    
-    # Output to console
-    switch ($Level) {
-        "ERROR" { Write-Error $Message }
-        "WARNING" { Write-Warning $Message }
-        "SUCCESS" { Write-Success $Message }
-        default { Write-Status $Message }
+# Cleanup function
+function Cleanup {
+    if (Test-Path $TmpDir) {
+        Remove-Item -Recurse -Force $TmpDir
     }
 }
 
-# Add installation pre-check function
-function Test-Prerequisites {
-    Write-Log "Checking prerequisites..." "INFO"
-    
-    # Check PowerShell version
-    if ($PSVersionTable.PSVersion.Major -lt 5) {
-        Write-Log "PowerShell 5.0 or higher is required" "ERROR"
-        return $false
-    }
-    
-    # Check internet connection
-    try {
-        $testConnection = Test-Connection -ComputerName "github.com" -Count 1 -Quiet
-        if (-not $testConnection) {
-            Write-Log "No internet connection available" "ERROR"
-            return $false
-        }
-    } catch {
-        Write-Log "Failed to check internet connection: $_" "ERROR"
-        return $false
-    }
-    
-    return $true
+# Error handler
+trap {
+    Write-Host "Error: $_" -ForegroundColor Red
+    Cleanup
+    Write-Host "Press enter to exit..."
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit 1
 }
 
-# Add file verification function
-function Test-FileHash {
-    param(
-        [string]$FilePath,
-        [string]$ExpectedHash
-    )
-    
-    $actualHash = Get-FileHash -Path $FilePath -Algorithm SHA256
-    return $actualHash.Hash -eq $ExpectedHash
+# Detect system architecture
+function Get-SystemArch {
+    if ([Environment]::Is64BitOperatingSystem) {
+        return "x86_64"
+    } else {
+        Write-Host "Unsupported architecture" -ForegroundColor Red
+        exit 1
+    }
 }
 
-# Modify download function, add progress bar
-function Download-File {
-    param(
+# Download with progress
+function Get-FileWithProgress {
+    param (
         [string]$Url,
-        [string]$OutFile
+        [string]$OutputFile
     )
     
     try {
         $webClient = New-Object System.Net.WebClient
         $webClient.Headers.Add("User-Agent", "PowerShell Script")
         
-        $webClient.DownloadFileAsync($Url, $OutFile)
-        
-        while ($webClient.IsBusy) {
-            Write-Progress -Activity "Downloading..." -Status "Progress:" -PercentComplete -1
-            Start-Sleep -Milliseconds 100
-        }
-        
-        Write-Progress -Activity "Downloading..." -Completed
+        $webClient.DownloadFile($Url, $OutputFile)
         return $true
     }
     catch {
-        Write-Log "Download failed: $_" "ERROR"
+        Write-Host "Failed to download: $_" -ForegroundColor Red
         return $false
     }
-    finally {
-        if ($webClient) {
-            $webClient.Dispose()
+}
+
+# Main installation function
+function Install-FlashCat {
+    Write-Host "Starting installation..." -ForegroundColor Cyan
+    
+    # Detect architecture
+    $arch = Get-SystemArch
+    Write-Host "Detected architecture: $arch" -ForegroundColor Green
+    
+    # Set installation directory
+    $InstallDir = "$env:ProgramFiles\flash-cat"
+    if (!(Test-Path $InstallDir)) {
+        New-Item -ItemType Directory -Path $InstallDir | Out-Null
+    }
+    
+    # Get latest release
+    try {
+        $latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/yunis-du/flash-cat/releases/latest"
+        Write-Host "Found latest release: $($latestRelease.tag_name)" -ForegroundColor Cyan
+        
+        # Look for Windows binary with our architecture
+        $version = $latestRelease.tag_name.TrimStart('v')
+        Write-Host "Version: $version" -ForegroundColor Cyan
+        $possibleNames = @(
+            "flash-cat-cli-windows-${version}-${arch}.zip",
+            "flash-cat-cli-windows-${version}-${arch}.zip"
+        )
+        
+        $asset = $null
+        foreach ($name in $possibleNames) {
+            Write-Host "Checking for asset: $name" -ForegroundColor Cyan
+            $asset = $latestRelease.assets | Where-Object { $_.name -eq $name }
+            if ($asset) {
+                Write-Host "Found matching asset: $($asset.name)" -ForegroundColor Green
+                break
+            }
+        }
+        
+        if (!$asset) {
+            Write-Host "`nAvailable assets:" -ForegroundColor Yellow
+            $latestRelease.assets | ForEach-Object { Write-Host "- $($_.name)" }
+            throw "Could not find appropriate Windows binary for $arch architecture"
+        }
+        
+        $downloadUrl = $asset.browser_download_url
+    }
+    catch {
+        Write-Host "Failed to get latest release: $_" -ForegroundColor Red
+        exit 1
+    }
+    
+    # Download binary
+    Write-Host "`nDownloading latest release..." -ForegroundColor Cyan
+    $binaryPath = Join-Path $TmpDir "flash-cat.zip"
+    
+    if (!(Get-FileWithProgress -Url $downloadUrl -OutputFile $binaryPath)) {
+        exit 1
+    }
+
+    if ((Get-Item $binaryPath).Length -eq 0) {
+        Write-Host "Failed to download flash-cat" -ForegroundColor Red
+        exit 1
+    }
+    
+    # Install binary
+    Write-Host "Installing..." -ForegroundColor Cyan
+    try {
+        Expand-Archive -Path $binaryPath -DestinationPath $TmpDir
+        Copy-Item -Path "$TmpDir\flash-cat.exe" -Destination "$InstallDir\flash-cat.exe" -Force
+        
+        # Add to PATH if not already present
+        $currentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+        if ($currentPath -notlike "*$InstallDir*") {
+            [Environment]::SetEnvironmentVariable("Path", "$currentPath;$InstallDir", "Machine")
         }
     }
-}
-
-# Main installation process
-Write-Status (Get-Message 0)
-
-# Get system architecture
-$arch = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "386" }
-Write-Status "$(Get-Message 1) $arch"
-
-if ($arch -ne "amd64") {
-    Write-Error (Get-Message 2)
-}
-
-# Get latest version
-$version = Get-LatestVersion
-Write-Status "$(Get-Message 3) $version"
-
-# Set up paths
-$installDir = "$env:LOCALAPPDATA\Programs\flash-cat"
-$versionWithoutV = $version.TrimStart('v')  # Remove 'v' prefix from version
-$binaryName = "flash-cat-${versionWithoutV}-x86_64.exe"
-$downloadUrl = "https://github.com/yunis-du/flash-cat/releases/download/$version/$binaryName"
-$tempFile = "$env:TEMP\$binaryName"
-
-# Create installation directory
-Write-Status (Get-Message 4)
-if (-not (Test-Path $installDir)) {
-    New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-}
-
-# Download binary
-Write-Status "$(Get-Message 5) $downloadUrl"
-try {
-    if (-not (Download-File -Url $downloadUrl -OutFile $tempFile)) {
-        Write-Error "$(Get-Message 6)"
+    catch {
+        Write-Host "Failed to install: $_" -ForegroundColor Red
+        exit 1
     }
-} catch {
-    Write-Error "$(Get-Message 6) $_"
+    
+    Write-Host "Installation completed successfully!" -ForegroundColor Green
 }
 
-# Verify download
-if (-not (Test-Path $tempFile)) {
-    Write-Error (Get-Message 7)
-}
-
-# Verify file size
-$fileSize = (Get-Item $tempFile).Length
-if ($fileSize -eq 0) {
-    Write-Error (Get-Message 8)
-}
-
-# Install binary / 安装二进制文件
-Write-Status (Get-Message 9)
+# Run installation
 try {
-    Move-Item -Force $tempFile "$installDir\flash-cat.exe"
-} catch {
-    Write-Error "$(Get-Message 10) $_"
+    Install-FlashCat
 }
-
-# Add to PATH if not already present
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notlike "*$installDir*") {
-    Write-Status (Get-Message 11)
-    [Environment]::SetEnvironmentVariable(
-        "Path",
-        "$userPath;$installDir",
-        "User"
-    )
+catch {
+    Write-Host "Installation failed: $_" -ForegroundColor Red
+    Cleanup
+    Write-Host "Press enter to exit..."
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit 1
 }
-
-# Cleanup
-Write-Status (Get-Message 12)
-if (Test-Path $tempFile) {
-    Remove-Item -Force $tempFile
-}
-
-Write-Success (Get-Message 13)
-Write-Host ""
-
-# Run program directly
-try {
-    Start-Process -FilePath "$installDir\flash-cat.exe" -ArgumentList "-v" -NoNewWindow
-} catch {
-    Write-Warning "Failed to start flash-cat: $_"
+finally {
+    Cleanup
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Press enter to exit..." -ForegroundColor Green
+        $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    }
 }
