@@ -9,10 +9,6 @@ rust-version.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[[bin]]
-name="flash-cat-relay"
-path="src/main.rs"
-
 [dependencies]
 flash_cat_common.workspace = true
 
