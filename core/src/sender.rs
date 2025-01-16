@@ -17,9 +17,9 @@ use flash_cat_common::{
         get_time_ms,
         net::{find_available_port, get_local_ip, net_scout::NetScout},
     },
-    Shutdown, APP_VERSION, CLI_VERSION,
+    Shutdown,
 };
-use flash_cat_relay::run_relay;
+use flash_cat_relay::{built_info, relay::Relay};
 use tokio::{fs::File, io::AsyncReadExt, sync::mpsc, time::MissedTickBehavior};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tonic::transport::Endpoint;
@@ -175,14 +175,32 @@ impl FlashCatSender {
         local_relay_shutdown: Shutdown,
     ) {
         tokio::spawn(async move {
-            if let Err(e) = run_relay(local_relay_addr, local_relay_shutdown.wait()).await {
-                let _ = &sender_stream_tx
-                    .send(SenderInteractionMessage::Error(format!(
-                        "start local relay error {}",
-                        e.to_string()
-                    )))
-                    .await;
-            }
+            let relay = match Relay::new(None) {
+                Ok(relay) => relay,
+                Err(e) => {
+                    let _ = &sender_stream_tx
+                        .send(SenderInteractionMessage::Error(format!(
+                            "start local relay error {}",
+                            e.to_string()
+                        )))
+                        .await;
+                    return;
+                }
+            };
+
+            let relay_task = async { relay.bind(local_relay_addr).await };
+
+            let signals_task = async {
+                tokio::select! {
+                    () = local_relay_shutdown.wait() => (),
+                    else => return,
+                }
+                // Waiting done message send to the right end.
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                relay.shutdown();
+            };
+
+            let _ = tokio::join!(relay_task, signals_task);
         });
     }
 
@@ -269,8 +287,8 @@ impl FlashCatSender {
 
         match self.client_type {
             ClientType::Cli => {
-                if compare_versions(CLI_VERSION, client_latest_version.as_str())
-                    == std::cmp::Ordering::Less
+                if compare_versions(client_latest_version.as_str(), built_info::PKG_VERSION)
+                    == std::cmp::Ordering::Greater
                 {
                     let _ = sender_stream_tx
                         .send(SenderInteractionMessage::Message(format!(
@@ -281,8 +299,8 @@ impl FlashCatSender {
                 }
             }
             ClientType::App => {
-                if compare_versions(APP_VERSION, client_latest_version.as_str())
-                    == std::cmp::Ordering::Less
+                if compare_versions(client_latest_version.as_str(), built_info::PKG_VERSION)
+                    == std::cmp::Ordering::Greater
                 {
                     let _ = sender_stream_tx
                         .send(SenderInteractionMessage::Message(format!(

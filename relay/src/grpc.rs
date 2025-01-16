@@ -8,14 +8,14 @@ use tonic::{Request, Response, Status, Streaming};
 use flash_cat_common::{
     proto::{
         join_response::JoinResponseMessage, relay_service_server::RelayService,
-        relay_update::RelayMessage, Character, ClientType, CloseRequest, CloseResponse, JoinFailed,
+        relay_update::RelayMessage, Character, CloseRequest, CloseResponse, JoinFailed,
         JoinRequest, JoinResponse, JoinSuccess, Joined, Ready, RelayInfo, RelayUpdate, Terminated,
     },
     utils::{get_time_ms, net::get_local_ip},
-    APP_VERSION, CLI_VERSION,
 };
 
 use crate::{
+    built_info,
     relay::RelayState,
     session::{Metadata, Session},
 };
@@ -66,7 +66,9 @@ impl RelayService for GrpcServer {
                         }
                     },
                     Character::Receiver => match self.0.lookup(&session_name) {
-                        None => return Err(Status::not_found("Not found, Please check share code.")),
+                        None => {
+                            return Err(Status::not_found("Not found, Please check share code."))
+                        }
                         Some(session) => {
                             sender_local_relay = session.metadata().sender_local_relay.clone();
                         }
@@ -87,13 +89,7 @@ impl RelayService for GrpcServer {
                     },
                 };
 
-                let client_latest_version = match ClientType::try_from(request.client_type) {
-                    Ok(client_type) => match client_type {
-                        ClientType::Cli => CLI_VERSION.to_string(),
-                        ClientType::App => APP_VERSION.to_string(),
-                    },
-                    Err(_) => "".to_string(),
-                };
+                let client_latest_version = built_info::PKG_VERSION.to_string();
 
                 Ok(Response::new(JoinResponse {
                     join_response_message: Some(JoinResponseMessage::Success(JoinSuccess {

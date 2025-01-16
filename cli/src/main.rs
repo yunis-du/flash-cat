@@ -1,9 +1,14 @@
-use std::process::ExitCode;
+use std::{
+    net::{IpAddr, SocketAddr},
+    process::ExitCode,
+};
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use flash_cat_cli::{built_info, receive::Receive, send::Send};
-use flash_cat_common::{utils::fs::is_file, VersionInfo, CLI_VERSION};
+use flash_cat_common::{init_logger, utils::fs::is_file, VersionInfo};
+use flash_cat_relay::relay::Relay;
+use log::info;
 #[cfg(windows)]
 use tokio::signal::ctrl_c;
 #[cfg(unix)]
@@ -26,6 +31,8 @@ enum SubCmd {
     Send(SendCmd),
     /// Receive file(s) or folder(s)
     Recv(RecvCmd),
+    /// Start relay server
+    Relay(RelayCmd),
 }
 
 #[derive(Parser, Debug)]
@@ -66,9 +73,32 @@ struct RecvCmd {
     lan: bool,
 }
 
+#[derive(Parser, Debug)]
+struct RelayCmd {
+    /// Which IP address or network interface to listen on.
+    #[clap(long, value_parser, default_value = "0.0.0.0")]
+    ip: IpAddr,
+
+    /// Relay port
+    #[clap(short = 'p', long, default_value = "6880")]
+    port: u16,
+
+    /// External access address.
+    #[clap(long, value_parser)]
+    external_ip: Option<IpAddr>,
+
+    /// Log file path of the relay server.
+    #[clap(long, default_value = "flash-cat-relay.log", env = "RELAY_LOG_PATH")]
+    log_file: String,
+
+    /// Log file path of the relay server.
+    #[clap(long, default_value = "info", env = "RUST_LOG")]
+    log_level: String,
+}
+
 const VERSION_INFO: &'static VersionInfo = &VersionInfo {
-    name: "Flash-Cat-CLI",
-    version: CLI_VERSION,
+    name: "Flash-Cat",
+    version: built_info::PKG_VERSION,
     commit_hash: built_info::GIT_COMMIT_HASH,
     build_time: built_info::BUILT_TIME_UTC,
 };
@@ -169,6 +199,49 @@ async fn recv(recv_cmd: RecvCmd) -> Result<()> {
     Ok(())
 }
 
+#[tokio::main]
+async fn start_relay(addr: SocketAddr, external_ip: Option<IpAddr>) -> Result<()> {
+    #[cfg(unix)]
+    let mut sigterm = signal(SignalKind::terminate())?;
+    #[cfg(unix)]
+    let mut sigint = signal(SignalKind::interrupt())?;
+    #[cfg(windows)]
+    let sigint = ctrl_c();
+
+    let relay = Relay::new(external_ip)?;
+
+    let relay_task = async {
+        info!("relay listening at {addr}");
+        relay.bind(addr).await
+    };
+
+    #[cfg(unix)]
+    let signals_task = async {
+        tokio::select! {
+            Some(()) = sigterm.recv() => (),
+            Some(()) = sigint.recv() => (),
+            else => return Ok(()),
+        }
+        info!("gracefully shutting down...");
+        relay.shutdown();
+        Ok(())
+    };
+
+    #[cfg(windows)]
+    let signals_task = async {
+        tokio::select! {
+            Ok(()) = sigint => (),
+            else => return Ok(()),
+        }
+        info!("gracefully shutting down...");
+        relay.shutdown();
+        Ok(())
+    };
+
+    tokio::try_join!(relay_task, signals_task)?;
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let cmd = Cmd::parse();
 
@@ -189,6 +262,17 @@ fn main() -> ExitCode {
             }
             SubCmd::Recv(recv_cmd) => {
                 return match recv(recv_cmd) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(err) => {
+                        println!("{err}");
+                        ExitCode::FAILURE
+                    }
+                };
+            }
+            SubCmd::Relay(relay_cmd) => {
+                init_logger(relay_cmd.log_level, relay_cmd.log_file);
+                let addr = SocketAddr::new(relay_cmd.ip, relay_cmd.port);
+                return match start_relay(addr, relay_cmd.external_ip) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {
                         println!("{err}");

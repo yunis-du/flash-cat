@@ -17,11 +17,13 @@ path="src/main.rs"
 [dependencies]
 flash_cat_common = { workspace = true, features = ["progress"] }
 flash_cat_core.workspace = true
+flash_cat_relay.workspace = true
 
 anyhow.workspace = true
 bytes.workspace = true
 clap.workspace = true
 dashmap.workspace = true
+log.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 indicatif.workspace = true

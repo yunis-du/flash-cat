@@ -10,6 +10,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use flash_cat_relay::built_info;
 use tokio::{fs, io::AsyncWriteExt, sync::mpsc, time::MissedTickBehavior};
 use tokio_stream::{wrappers::ReceiverStream as TokioReceiverStream, Stream, StreamExt};
 use tonic::transport::Endpoint;
@@ -24,7 +25,7 @@ use flash_cat_common::{
         CloseRequest, Confirm, Done, FileConfirm, Id, JoinRequest, ReceiverUpdate, RelayUpdate,
     },
     utils::{fs::reset_path, get_time_ms, net::net_scout::NetScout},
-    Shutdown, APP_VERSION, CLI_VERSION,
+    Shutdown,
 };
 
 use crate::{
@@ -196,8 +197,8 @@ impl FlashCatReceiver {
 
         match self.client_type {
             ClientType::Cli => {
-                if compare_versions(client_latest_version.as_str(), CLI_VERSION)
-                    == std::cmp::Ordering::Less
+                if compare_versions(client_latest_version.as_str(), built_info::PKG_VERSION)
+                    == std::cmp::Ordering::Greater
                 {
                     let _ = receiver_stream_tx
                         .send(ReceiverInteractionMessage::Message(format!(
@@ -208,8 +209,8 @@ impl FlashCatReceiver {
                 }
             }
             ClientType::App => {
-                if compare_versions(client_latest_version.as_str(), APP_VERSION)
-                    == std::cmp::Ordering::Less
+                if compare_versions(client_latest_version.as_str(), built_info::PKG_VERSION)
+                    == std::cmp::Ordering::Greater
                 {
                     let _ = receiver_stream_tx
                         .send(ReceiverInteractionMessage::Message(format!(

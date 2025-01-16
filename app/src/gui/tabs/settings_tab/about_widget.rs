@@ -1,7 +1,6 @@
 use crate::gui::assets::icons::GITHUB_ICON;
 use crate::gui::styles;
 
-use flash_cat_common::APP_VERSION;
 use iced::widget::{button, column, container, mouse_area, row, svg, text};
 use iced::{mouse, Element, Length, Task};
 use iced_aw::{grid, grid_row};
@@ -55,7 +54,7 @@ fn info_widget() -> Element<'static, Message> {
 
     let mut grid = grid![
         grid_row![text("Author"), text(built_info::PKG_AUTHORS)],
-        grid_row![text("Version"), text(APP_VERSION)],
+        grid_row![text("Version"), text(built_info::PKG_VERSION)],
         grid_row![text("License"), text(built_info::PKG_LICENSE)],
         grid_row![text("Repository"), repository],
     ];
