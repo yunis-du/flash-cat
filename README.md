@@ -16,10 +16,18 @@ Securely send the file folder from one computer to another computer.
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yunis-du/flash-cat/master/install.sh | sudo bash
 ```
+##### China mainland
+```bash
+curl -fsSL https://download.yunisdu.com/flash-cat/install_cn.sh | sudo bash
+```
 
 #### Windows(Run Powershell as Administrator)
 ```powershell
 irm https://raw.githubusercontent.com/yunis-du/flash-cat/master/install.ps1 | iex
+```
+##### China mainland
+```powershell
+irm https://download.yunisdu.com/flash-cat/install_cn.ps1 | iex
 ```
 
 ### Use yum install
