@@ -242,8 +242,13 @@ pub fn zip_folder<P: AsRef<Path>>(file_name: String, path: P, shutdown: Shutdown
                 if let Ok(read_dir) = fs::read_dir(path) {
                     if read_dir.count() == 0 {
                         // add empty directory
-                        let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
-                        zip.add_directory(dir_name, options).unwrap();
+                        match zip.add_directory_from_path(path, options) {
+                            Ok(_) => (),
+                            Err(e) => {
+                                println!("add_directory [{}] error: {}", path_string, e);
+                                shutdown.shutdown();
+                            }
+                        }
                     }
                 }
             }
