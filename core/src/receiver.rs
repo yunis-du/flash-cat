@@ -498,9 +498,14 @@ impl FlashCatReceiver {
                                             RecvFile::new({
                                                 let file = fs::File::create(&absolute_path).await?;
                                                 file.set_permissions(
-                                                    std::fs::Permissions::from_mode(
-                                                        new_file_req.file_mode,
-                                                    ),
+                                                    if new_file_req.file_mode > 0 {
+                                                        std::fs::Permissions::from_mode(
+                                                            new_file_req.file_mode,
+                                                        )
+                                                    } else {
+                                                        // Set as the default permissions of the file
+                                                        std::fs::Permissions::from_mode(0o644)
+                                                    },
                                                 )
                                                 .await?;
                                                 file
