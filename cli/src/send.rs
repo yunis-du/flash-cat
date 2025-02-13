@@ -48,9 +48,18 @@ impl Send {
 
     pub async fn run(&self) -> Result<()> {
         let file_collector = self.sender.get_file_collector();
-        print!("Sending {} files ", file_collector.num_files);
+        if file_collector.num_files == 1 {
+            print!("Sending {} file ", file_collector.num_files);
+        } else {
+            print!("Sending {} files ", file_collector.num_files);
+        }
+
         if file_collector.num_folders > 0 {
-            print!("and {} folders ", file_collector.num_folders);
+            if file_collector.num_files == 1 {
+                print!("and {} folder ", file_collector.num_folders);
+            } else {
+                print!("and {} folders ", file_collector.num_folders);
+            }
         }
         println!("({})", file_collector.total_size_to_human_readable());
         println!("Share code is: {}", self.share_code);
