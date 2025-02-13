@@ -1,8 +1,7 @@
 use std::time::{Duration, SystemTime};
 
 use indicatif::{HumanBytes, HumanDuration};
-use rand::distributions::Alphanumeric;
-use rand::{Rng, SeedableRng};
+use rand::{distr::Alphanumeric, Rng, SeedableRng};
 
 pub mod fs;
 pub mod net;
@@ -21,10 +20,10 @@ pub fn convert_bytes_to_human_readable(bytes: u64) -> String {
 }
 
 pub fn gen_share_code() -> String {
-    let mut rng = rand::rngs::StdRng::from_entropy();
+    let mut rng = rand::rngs::StdRng::from_os_rng();
     format!(
         "{}-{}-{}",
-        rng.gen_range(10..99),
+        rng.random_range(10..99),
         (0..4)
             .map(|_| rng.sample(Alphanumeric) as char)
             .collect::<String>(),
