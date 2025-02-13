@@ -20,7 +20,7 @@ use flash_cat_common::{
     Shutdown,
 };
 use flash_cat_relay::{built_info, relay::Relay};
-use tokio::{fs::File, io::AsyncReadExt, sync::mpsc, time::MissedTickBehavior};
+use tokio::{fs::File, io::AsyncReadExt, signal::ctrl_c, sync::mpsc, time::MissedTickBehavior};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tonic::transport::Endpoint;
 
@@ -644,14 +644,23 @@ impl FlashCatSender {
                 );
                 let path = p.to_owned();
                 let file_name_for_task = file_name.clone();
-                let shutdown = shutdown.clone();
+                let shutdown_clone = shutdown.clone();
                 async_task.push(tokio::spawn(async move {
-                    zip_folder(file_name_for_task, path, shutdown)
+                    zip_folder(file_name_for_task, path, shutdown_clone)
                 }));
                 zip_files.push(file_name.clone());
                 files[i] = file_name;
             }
         }
+
+        let sigint = ctrl_c();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = sigint => (),
+            }
+            shutdown.shutdown();
+        });
+
         for task in async_task {
             task.await??;
         }
