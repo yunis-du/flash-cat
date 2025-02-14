@@ -255,7 +255,7 @@ fn main() -> ExitCode {
                 return match send(send_cmd) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {
-                        println!("{err}");
+                        println!("{err:?}");
                         ExitCode::FAILURE
                     }
                 };
@@ -264,7 +264,7 @@ fn main() -> ExitCode {
                 return match recv(recv_cmd) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {
-                        println!("{err}");
+                        println!("{err:?}");
                         ExitCode::FAILURE
                     }
                 };
@@ -275,7 +275,7 @@ fn main() -> ExitCode {
                 return match start_relay(addr, relay_cmd.external_ip) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {
-                        println!("{err}");
+                        println!("{err:?}");
                         ExitCode::FAILURE
                     }
                 };
