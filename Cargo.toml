@@ -11,7 +11,7 @@ members = [
 [workspace.package]
 authors = ["Yunis Du <yunis@88.com>"]
 license = "MIT"
-version = "2.0.4"
+version = "2.0.5"
 description= "Securely send the file folder from one computer to another computer."
 edition = "2021"
 repository = "https://github.com/yunis-du/flash-cat"
