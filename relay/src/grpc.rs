@@ -11,7 +11,7 @@ use flash_cat_common::{
         relay_update::RelayMessage, Character, CloseRequest, CloseResponse, JoinFailed,
         JoinRequest, JoinResponse, JoinSuccess, Joined, Ready, RelayInfo, RelayUpdate, Terminated,
     },
-    utils::{get_time_ms, net::get_local_ip},
+    utils::net::get_local_ip,
 };
 
 use crate::{
@@ -228,9 +228,8 @@ async fn handle_update(
             if let RelayMessage::Join(_) = relay_message {
                 return send_err(tx, "unexpected join".into()).await;
             }
-            if let RelayMessage::Ping(ts) = relay_message {
-                let now = get_time_ms();
-                return send_msg(tx, RelayMessage::Pong(now - ts)).await;
+            if let RelayMessage::Ping(_) = relay_message {
+                return send_msg(tx, RelayMessage::Pong(0)).await;
             }
             if let Err(_) = update_tx.send(relay_message).await {
                 return false;

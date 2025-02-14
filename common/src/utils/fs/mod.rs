@@ -218,6 +218,7 @@ pub fn zip_folder<P: AsRef<Path>>(file_name: String, path: P, shutdown: Shutdown
     } else {
         folder_path
     };
+    let root_dir = file_name.splitn(2, ".").next().unwrap_or("root_dir");
 
     #[cfg(feature = "progress")]
     let pb = {
@@ -237,7 +238,7 @@ pub fn zip_folder<P: AsRef<Path>>(file_name: String, path: P, shutdown: Shutdown
         .any(|entry| {
             let path = entry.path();
             let path_string = path.to_string_lossy().as_ref().to_string();
-            let path_in_zip = path_string.replace(folder_path.as_str(), "");
+            let path_in_zip = format!("{}/{}", root_dir, path_string.replace(folder_path.as_str(), ""));
             if path.is_dir() {
                 if let Ok(read_dir) = fs::read_dir(path) {
                     if read_dir.count() == 0 {
