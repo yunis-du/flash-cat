@@ -79,7 +79,7 @@ main() {
     echo -e "${GREEN}Detected: $OS $ARCH${NC}"
     
     # Set installation directory
-    INSTALL_DIR="/usr/local/bin"
+    INSTALL_DIR="/usr/bin"
     
     # Setup installation directory
     setup_install_dir "$INSTALL_DIR"
