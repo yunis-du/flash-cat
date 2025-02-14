@@ -42,7 +42,7 @@ struct SendCmd {
     zip: bool,
 
     /// Relay address (default: public relay [https://flashcat.yunisdu.com])
-    #[clap(long)]
+    #[clap(long, env = "FLASH_CAT_RELAY_ADDR")]
     relay: Option<String>,
 
     /// File(s) or folder(s) to send
@@ -57,7 +57,7 @@ struct RecvCmd {
     share_code: String,
 
     /// Relay address (default: public relay [https://flashcat.yunisdu.com])
-    #[clap(long)]
+    #[clap(long, env = "FLASH_CAT_RELAY_ADDR")]
     relay: Option<String>,
 
     /// The save path of the received file(s) or folder(s)
@@ -88,7 +88,7 @@ struct RelayCmd {
     external_ip: Option<IpAddr>,
 
     /// Log file path of the relay server.
-    #[clap(long, default_value = "flash-cat-relay.log", env = "RELAY_LOG_PATH")]
+    #[clap(long, default_value = "flash-cat-relay.log", env = "FLASH_CAT_RELAY_LOG_PATH")]
     log_file: String,
 
     /// Log file path of the relay server.

@@ -102,16 +102,11 @@ impl Tab for SettingsTab {
 }
 
 pub mod settings_config {
-    use std::{
-        io::ErrorKind,
-        sync::{Arc, LazyLock, RwLock},
-    };
+    use std::sync::{Arc, LazyLock, RwLock};
 
-    use flash_cat_common::consts::PUBLIC_RELAY;
-    use log::{error, info, warn};
+    use flash_cat_common::consts::{APP_CONFIG_FILE_NAME, APP_NAME, PUBLIC_RELAY};
+    use log::error;
     use serde::{Deserialize, Serialize};
-
-    use crate::folder::get_config_dir_path;
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, Eq, PartialEq)]
     pub enum Theme {
@@ -228,65 +223,21 @@ pub mod settings_config {
         }
     }
 
-    pub const CONFIG_FILE_NAME: &str = "config.toml";
-
     fn load_config() -> Config {
-        let config_directory = get_config_dir_path();
-
-        let mut config_file = config_directory.clone();
-        config_file.push(CONFIG_FILE_NAME);
-
-        info!("loading config file at: '{}'", config_file.display());
-
-        let file_contents = match std::fs::read_to_string(&config_file) {
-            Ok(file_contents) => file_contents,
-            Err(err) => {
+        let cfg: Config = match confy::load(APP_NAME, APP_CONFIG_FILE_NAME) {
+            Ok(cfg) => cfg,
+            Err(_) => {
                 let default_config = Config::default();
-                if let ErrorKind::NotFound = err.kind() {
-                    warn!("could not find config file at: '{}'", config_file.display());
-                    std::fs::DirBuilder::new()
-                        .recursive(true)
-                        .create(config_directory)
-                        .unwrap_or_else(|err| error!("could not create config directory: {err}"));
-                    std::fs::write(
-                        &config_file,
-                        toml::to_string_pretty(&default_config).unwrap(),
-                    )
-                    .unwrap_or_else(|err| error!("could not write default config file: {err}"));
-                    info!(
-                        "created a new default config file at: '{}'",
-                        config_file.display()
-                    );
-                }
+                let _ = confy::store(APP_NAME, APP_CONFIG_FILE_NAME, &default_config);
                 return default_config;
             }
         };
-
-        match toml::from_str(&file_contents) {
-            Ok(config) => config,
-            Err(err) => {
-                error!("could not parse the config file: {}", err);
-                warn!("loading with default settings");
-                Config::default()
-            }
-        }
+        cfg
     }
 
     fn save_config(settings_config: &Config) {
-        let config_directory = get_config_dir_path();
-
-        let mut config_file = config_directory.clone();
-        config_file.push(CONFIG_FILE_NAME);
-
-        if let Err(err) = std::fs::write(
-            &config_file,
-            toml::to_string_pretty(&settings_config).unwrap(),
-        ) {
-            error!(
-                "Could not write default config file '{}': {}",
-                config_file.display(),
-                err
-            );
+        if let Err(err) = confy::store(APP_NAME, APP_CONFIG_FILE_NAME, &settings_config) {
+            error!("Could not write config file: {}", err);
         }
     }
 }
