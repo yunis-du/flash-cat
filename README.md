@@ -74,5 +74,11 @@ receive:
 flash-cat recv xx-xxxx-xxxx
 ```
 
-## Deployment your owner relay
-...
+## Deploy your own relay server
+
+You can deploy your own relay server to handle file transfers within your local network or over the internet.
+
+### Start relay server
+```bash
+flash-cat relay
+```
