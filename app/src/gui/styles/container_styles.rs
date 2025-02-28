@@ -1,7 +1,8 @@
-use super::theme::FlashCatTheme;
 use iced::widget::container::Style;
-use iced::{color, Color, Theme};
 use iced::{Background, Border};
+use iced::{Color, Theme, color};
+
+use super::theme::FlashCatTheme;
 
 /// A custom theme for container respecting Light and Dark FlashCatTheme
 pub fn first_class_container_rounded_theme(theme: &Theme) -> Style {

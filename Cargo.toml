@@ -13,9 +13,9 @@ authors = ["Yunis Du <yunis@88.com>"]
 license = "MIT"
 version = "2.0.5"
 description= "Securely send the file folder from one computer to another computer."
-edition = "2021"
+edition = "2024"
 repository = "https://github.com/yunis-du/flash-cat"
-rust-version = "1.80"
+rust-version = "1.85"
 
 [workspace.dependencies]
 flash_cat_common = {path = "common" }

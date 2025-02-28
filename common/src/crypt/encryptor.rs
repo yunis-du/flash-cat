@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use aes_gcm::{
-    aead::{generic_array::GenericArray, Aead},
+    aead::{Aead, generic_array::GenericArray},
     {Aes256Gcm, KeyInit},
 };
 use anyhow::Result;

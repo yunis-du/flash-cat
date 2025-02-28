@@ -1,8 +1,9 @@
-use flash_cat_common::utils::{human_bytes, human_duration};
 use iced::{
-    widget::{column, horizontal_space, progress_bar, row, text},
     Element,
+    widget::{column, horizontal_space, progress_bar, row, text},
 };
+
+use flash_cat_common::utils::{human_bytes, human_duration};
 
 use super::styles;
 

@@ -5,14 +5,15 @@ use std::{
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
-use flash_cat_cli::{built_info, receive::Receive, send::Send};
-use flash_cat_common::{init_logger, utils::fs::is_file, VersionInfo};
-use flash_cat_relay::relay::Relay;
 use log::info;
 #[cfg(windows)]
 use tokio::signal::ctrl_c;
 #[cfg(unix)]
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
+
+use flash_cat_cli::{built_info, receive::Receive, send::Send};
+use flash_cat_common::{VersionInfo, init_logger, utils::fs::is_file};
+use flash_cat_relay::relay::Relay;
 
 #[derive(Parser, Debug)]
 #[clap(name = "flash-cat-cli")]
@@ -88,7 +89,11 @@ struct RelayCmd {
     external_ip: Option<IpAddr>,
 
     /// Log file path of the relay server.
-    #[clap(long, default_value = "flash-cat-relay.log", env = "FLASH_CAT_RELAY_LOG_PATH")]
+    #[clap(
+        long,
+        default_value = "flash-cat-relay.log",
+        env = "FLASH_CAT_RELAY_LOG_PATH"
+    )]
     log_file: String,
 
     /// Log file path of the relay server.

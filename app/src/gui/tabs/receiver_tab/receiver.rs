@@ -1,18 +1,15 @@
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc, LazyLock,
+    atomic::{AtomicU64, Ordering},
 };
 
-use flash_cat_core::{
-    receiver::FlashCatReceiver,
-    ReceiverInteractionMessage,
-};
 use iced::futures::{SinkExt, Stream, StreamExt};
 use iced::stream::try_channel;
 
-use crate::gui::tabs::receiver_tab::ConfirmType;
+use flash_cat_core::{ReceiverInteractionMessage, receiver::FlashCatReceiver};
 
-use super::{ReceiverNotification, ReceiverState, RECEIVER_NOTIFICATION, RECEIVER_STATE};
+use super::{RECEIVER_NOTIFICATION, RECEIVER_STATE, ReceiverNotification, ReceiverState};
+use crate::gui::tabs::receiver_tab::ConfirmType;
 
 pub(super) static RECV_NUM_FILES: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
 
@@ -32,8 +29,10 @@ pub fn run(fcr: Arc<FlashCatReceiver>) -> impl Stream<Item = Result<(u64, Progre
                     return if e.contains("NotFound") {
                         Err(Error::ShareCodeNotFound)
                     } else {
-                        Err(Error::OtherErroe(format!("An error occurred: {}", e.to_string())))
-
+                        Err(Error::OtherErroe(format!(
+                            "An error occurred: {}",
+                            e.to_string()
+                        )))
                     };
                 }
                 ReceiverInteractionMessage::SendFilesRequest(send_req) => {
@@ -56,17 +55,26 @@ pub fn run(fcr: Arc<FlashCatReceiver>) -> impl Stream<Item = Result<(u64, Progre
                         ConfirmType::FileDuplication(file_duplication.file_id),
                         confirm_msg,
                     );
-                    let _ = sender.send((file_duplication.file_id, Progress::None)).await;
+                    let _ = sender
+                        .send((file_duplication.file_id, Progress::None))
+                        .await;
                 }
                 ReceiverInteractionMessage::RecvNewFile(recv_new_file) => {
-                    let _ = sender.send((recv_new_file.file_id, Progress::New(
-                        recv_new_file.file_id,
-                        recv_new_file.filename.clone(),
-                        recv_new_file.size,
-                    ))).await;
+                    let _ = sender
+                        .send((
+                            recv_new_file.file_id,
+                            Progress::New(
+                                recv_new_file.file_id,
+                                recv_new_file.filename.clone(),
+                                recv_new_file.size,
+                            ),
+                        ))
+                        .await;
                 }
                 ReceiverInteractionMessage::FileProgress(fp) => {
-                    let _ = sender.send((fp.file_id, Progress::Received(fp.position as f32))).await;
+                    let _ = sender
+                        .send((fp.file_id, Progress::Received(fp.position as f32)))
+                        .await;
                 }
                 ReceiverInteractionMessage::FileProgressFinish(file_id) => {
                     let _ = sender.send((file_id, Progress::Finished)).await;

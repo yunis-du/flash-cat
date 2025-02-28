@@ -10,27 +10,27 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use flash_cat_relay::built_info;
-use tokio::{fs, io::AsyncWriteExt, sync::mpsc, time::MissedTickBehavior};
-use tokio_stream::{wrappers::ReceiverStream as TokioReceiverStream, Stream, StreamExt};
+use tokio::{fs, io::AsyncWriteExt, sync::mpsc};
+use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream as TokioReceiverStream};
 use tonic::transport::Endpoint;
 
 use flash_cat_common::{
-    compare_versions,
+    Shutdown, compare_versions,
     consts::PUBLIC_RELAY,
     crypt::encryptor::Encryptor,
     proto::{
-        join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
-        relay_update::RelayMessage, sender_update::SenderMessage, Character, ClientType,
-        CloseRequest, Confirm, Done, FileConfirm, Id, JoinRequest, ReceiverUpdate, RelayUpdate,
+        Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, Id, JoinRequest,
+        ReceiverUpdate, RelayUpdate, join_response, receiver_update::ReceiverMessage,
+        relay_service_client::RelayServiceClient, relay_update::RelayMessage,
+        sender_update::SenderMessage,
     },
-    utils::{fs::reset_path, get_time_ms, net::net_scout::NetScout},
-    Shutdown,
+    utils::{fs::reset_path, net::net_scout::NetScout},
 };
+use flash_cat_relay::built_info;
 
 use crate::{
     FileDuplication, Progress, ReceiverConfirm, ReceiverInteractionMessage, RecvNewFile, RelayType,
-    SendFilesRequest, PING_INTERVAL,
+    SendFilesRequest, get_endpoint,
 };
 
 static OUT_DIR: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new("".to_string()));
@@ -85,7 +85,7 @@ impl FlashCatReceiver {
                 }
                 Err(_) => specify_relay,
             };
-            let endpoint = Endpoint::from_shared(specify_relay_addr)?;
+            let endpoint = get_endpoint(specify_relay_addr)?;
             self.connect_relay(
                 RelayType::Specify,
                 endpoint,
@@ -98,7 +98,7 @@ impl FlashCatReceiver {
             let relay_addr = self.discovery_relay_addr().await;
             if relay_addr.is_some() {
                 let relay_addr = relay_addr.unwrap();
-                let endpoint = Endpoint::from_shared(format!("http://{relay_addr}"))?;
+                let endpoint = get_endpoint(format!("http://{relay_addr}"))?;
                 self.connect_relay(
                     RelayType::Local,
                     endpoint,
@@ -108,7 +108,7 @@ impl FlashCatReceiver {
                 .await?;
             } else {
                 // public relay
-                let endpoint = Endpoint::from_shared(format!("https://{PUBLIC_RELAY}"))?;
+                let endpoint = get_endpoint(format!("https://{PUBLIC_RELAY}"))?;
                 self.connect_relay(
                     RelayType::Public,
                     endpoint,
@@ -188,7 +188,7 @@ impl FlashCatReceiver {
                         join_success.client_latest_version,
                     ),
                     join_response::JoinResponseMessage::Failed(join_failed) => {
-                        return Err(anyhow::Error::msg(join_failed.error_msg))
+                        return Err(anyhow::Error::msg(join_failed.error_msg));
                     }
                 }
             } else {
@@ -225,7 +225,7 @@ impl FlashCatReceiver {
         let endpoint = if relay_type == RelayType::Public && self.lan {
             let sender_local_relay_endpoint = if sender_local_relay.is_some() {
                 let sender_local_relay = sender_local_relay.unwrap();
-                let sender_local_relay_endpoint = Endpoint::from_shared(format!(
+                let sender_local_relay_endpoint = get_endpoint(format!(
                     "http://{}:{}",
                     sender_local_relay.relay_ip, sender_local_relay.relay_port
                 ))?;
@@ -254,10 +254,7 @@ impl FlashCatReceiver {
                 None => {
                     if relay.is_some() {
                         let relay = relay.unwrap();
-                        Endpoint::from_shared(format!(
-                            "http://{}:{}",
-                            relay.relay_ip, relay.relay_port
-                        ))?
+                        get_endpoint(format!("http://{}:{}", relay.relay_ip, relay.relay_port))?
                     } else {
                         endpoint
                     }
@@ -312,9 +309,6 @@ impl FlashCatReceiver {
         let resp = client.channel(TokioReceiverStream::new(rx)).await?;
         let mut messages = resp.into_inner(); // A stream of relay messages.
 
-        let mut ping_interval = tokio::time::interval(PING_INTERVAL);
-        ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
         loop {
             let message = tokio::select! {
                 _ = shutdown.wait() => {
@@ -323,11 +317,6 @@ impl FlashCatReceiver {
                     })
                     .await?;
                     return Ok(());
-                }
-                // Send periodic pings to the relay.
-                _ = ping_interval.tick() => {
-                    Self::send_msg_to_relay(&tx, RelayMessage::Ping(get_time_ms())).await?;
-                    continue;
                 }
                 Ok(confirm) = confirm_rx.recv() => {
                     match confirm {

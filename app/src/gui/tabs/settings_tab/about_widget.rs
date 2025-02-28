@@ -1,10 +1,10 @@
-use crate::gui::assets::icons::GITHUB_ICON;
-use crate::gui::styles;
-
 use iced::widget::{button, column, container, mouse_area, row, svg, text};
-use iced::{mouse, Element, Length, Task};
+use iced::{Element, Length, Task, mouse};
 use iced_aw::{grid, grid_row};
 use log::error;
+
+use crate::gui::assets::icons::GITHUB_ICON;
+use crate::gui::styles;
 
 #[derive(Debug, Clone)]
 pub enum Message {

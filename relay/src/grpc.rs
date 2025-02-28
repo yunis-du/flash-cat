@@ -2,14 +2,14 @@ use std::{sync::Arc, time::Duration};
 
 use log::{debug, error, info, warn};
 use tokio::sync::mpsc;
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status, Streaming};
 
 use flash_cat_common::{
     proto::{
-        join_response::JoinResponseMessage, relay_service_server::RelayService,
-        relay_update::RelayMessage, Character, CloseRequest, CloseResponse, JoinFailed,
-        JoinRequest, JoinResponse, JoinSuccess, Joined, Ready, RelayInfo, RelayUpdate, Terminated,
+        Character, CloseRequest, CloseResponse, JoinFailed, JoinRequest, JoinResponse, JoinSuccess,
+        Joined, Ready, RelayInfo, RelayUpdate, Terminated, join_response::JoinResponseMessage,
+        relay_service_server::RelayService, relay_update::RelayMessage,
     },
     utils::net::get_local_ip,
 };
@@ -67,7 +67,7 @@ impl RelayService for GrpcServer {
                     },
                     Character::Receiver => match self.0.lookup(&session_name) {
                         None => {
-                            return Err(Status::not_found("Not found, Please check share code."))
+                            return Err(Status::not_found("Not found, Please check share code."));
                         }
                         Some(session) => {
                             sender_local_relay = session.metadata().sender_local_relay.clone();

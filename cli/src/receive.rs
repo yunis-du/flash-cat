@@ -1,14 +1,15 @@
 use std::{
-    io::{stdin, stdout, Write},
+    io::{Write, stdin, stdout},
     sync::Arc,
     time::Duration,
 };
 
 use anyhow::Result;
-use flash_cat_common::{proto::ClientType, Shutdown};
-use flash_cat_core::{receiver::FlashCatReceiver, ReceiverConfirm, ReceiverInteractionMessage};
 use indicatif::HumanBytes;
 use tokio_stream::StreamExt;
+
+use flash_cat_common::{Shutdown, proto::ClientType};
+use flash_cat_core::{ReceiverConfirm, ReceiverInteractionMessage, receiver::FlashCatReceiver};
 
 use crate::progress::Progress;
 

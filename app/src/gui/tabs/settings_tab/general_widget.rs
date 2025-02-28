@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use iced::widget::{
     button, column, container, horizontal_space, mouse_area, row, text, text_input,
 };
-use iced::{mouse, Element, Task};
+use iced::{Element, Task, mouse};
 
 use super::settings_config::SETTINGS;
 use crate::folder::pick_floder;
@@ -69,9 +69,11 @@ impl General {
     }
 
     pub fn view(&self) -> Element<Message> {
-        let content = column![text("General")
-            .size(21)
-            .style(styles::text_styles::accent_color_theme)]
+        let content = column![
+            text("General")
+                .size(21)
+                .style(styles::text_styles::accent_color_theme)
+        ]
         .padding(5)
         .spacing(5);
 

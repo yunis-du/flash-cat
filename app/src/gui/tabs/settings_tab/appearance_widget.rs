@@ -1,9 +1,9 @@
 use iced::{
-    widget::{column, container, radio, text, Column, Space},
-    Task, Element, Length,
+    Element, Length, Task,
+    widget::{Column, Space, column, container, radio, text},
 };
 
-use super::settings_config::{Theme, ALL_THEMES, SETTINGS};
+use super::settings_config::{ALL_THEMES, SETTINGS, Theme};
 use crate::gui::styles;
 
 #[derive(Debug, Clone)]
@@ -28,9 +28,11 @@ impl Appearance {
     }
 
     pub fn view(&self) -> Element<Message> {
-        let content = column![text("Appearance")
-            .size(21)
-            .style(styles::text_styles::accent_color_theme)]
+        let content = column![
+            text("Appearance")
+                .size(21)
+                .style(styles::text_styles::accent_color_theme)
+        ]
         .padding(5)
         .spacing(5);
 

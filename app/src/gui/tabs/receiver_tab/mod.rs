@@ -1,29 +1,29 @@
 use std::{
     path::Path,
-    sync::{atomic::Ordering, Arc, LazyLock, RwLock},
+    sync::{Arc, LazyLock, RwLock, atomic::Ordering},
 };
 
-use flash_cat_common::{consts::PUBLIC_RELAY, proto::ClientType};
-use flash_cat_core::{receiver::FlashCatReceiver, ReceiverConfirm};
 use iced::{
-    font,
+    Alignment,
+    widget::{
+        Column,
+        scrollable::{Id, RelativeOffset, Viewport},
+        tooltip::Position,
+    },
+};
+use iced::{
+    Element, Font, Length, Task, font,
     widget::{
         button, checkbox, column, container, horizontal_space, row, scrollable, svg, text,
         text_input, tooltip,
     },
-    Element, Font, Length, Task,
 };
-use iced::{
-    widget::{
-        scrollable::{Id, RelativeOffset, Viewport},
-        tooltip::Position,
-        Column,
-    },
-    Alignment,
-};
-use receiver::{recv, Error, Progress, RECV_NUM_FILES};
+use receiver::{Error, Progress, RECV_NUM_FILES, recv};
 
-use super::{settings_tab::settings_config::SETTINGS, Tab};
+use flash_cat_common::{consts::PUBLIC_RELAY, proto::ClientType};
+use flash_cat_core::{ReceiverConfirm, receiver::FlashCatReceiver};
+
+use super::{Tab, settings_tab::settings_config::SETTINGS};
 use crate::gui::{
     assets::icons::{HELP_ICON, RECEIVER_ICON},
     progress_bar_widget::{Message as ProgressBarMessage, ProgressBar, State as ProgressBarState},
@@ -377,48 +377,54 @@ impl ReceiverTab {
 
     fn progress_view(&self) -> Element<'_, Message> {
         if !self.progress_bars.is_empty() {
-            column!(container(
-                scrollable(
-                    Column::from_vec(
-                        self.progress_bars
-                            .iter()
-                            .map(|progress_bar| { progress_bar.view().map(Message::ProgressBar) })
-                            .collect(),
+            column!(
+                container(
+                    scrollable(
+                        Column::from_vec(
+                            self.progress_bars
+                                .iter()
+                                .map(|progress_bar| {
+                                    progress_bar.view().map(Message::ProgressBar)
+                                })
+                                .collect(),
+                        )
+                        .padding(10)
+                        .spacing(5)
+                        .width(Length::Fill)
                     )
-                    .padding(10)
-                    .spacing(5)
-                    .width(Length::Fill)
+                    .id(self.scrollable_id.clone())
+                    .on_scroll(Message::PageScrolled)
+                    .height(300)
+                    .direction(styles::scrollable_styles::vertical_direction())
                 )
-                .id(self.scrollable_id.clone())
-                .on_scroll(Message::PageScrolled)
+                .style(styles::container_styles::first_class_container_rounded_theme)
                 .height(300)
-                .direction(styles::scrollable_styles::vertical_direction())
+                .width(Length::Fill)
             )
-            .style(styles::container_styles::first_class_container_rounded_theme)
-            .height(300)
-            .width(Length::Fill))
             .width(Length::Fill)
             .spacing(5)
             .into()
         } else {
-            column!(container(
-                text(
-                    if RECEIVER_STATE.read().unwrap().eq(&ReceiverState::Recving) {
-                        "Recving..."
-                    } else {
-                        "Enter share code to receive"
-                    }
+            column!(
+                container(
+                    text(
+                        if RECEIVER_STATE.read().unwrap().eq(&ReceiverState::Recving) {
+                            "Recving..."
+                        } else {
+                            "Enter share code to receive"
+                        }
+                    )
+                    .font(Font {
+                        weight: font::Weight::Bold,
+                        ..Default::default()
+                    })
                 )
-                .font(Font {
-                    weight: font::Weight::Bold,
-                    ..Default::default()
-                })
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .style(styles::container_styles::first_class_container_rounded_theme)
+                .height(300)
+                .width(Length::Fill)
             )
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .style(styles::container_styles::first_class_container_rounded_theme)
-            .height(300)
-            .width(Length::Fill))
             .width(Length::Fill)
             .spacing(5)
             .into()

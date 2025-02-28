@@ -1,6 +1,7 @@
-use super::colors::accent_color;
 use iced::theme::{Custom, Palette};
-use iced::{color, Color};
+use iced::{Color, color};
+
+use super::colors::accent_color;
 
 #[derive(Default)]
 pub enum FlashCatTheme {

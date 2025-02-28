@@ -1,15 +1,16 @@
 use std::{
     env,
-    io::{stdout, Write},
+    io::{Write, stdout},
     path::PathBuf,
     process,
     sync::Arc,
 };
 
 use anyhow::Result;
-use flash_cat_common::{proto::ClientType, utils::gen_share_code, Shutdown};
-use flash_cat_core::{sender::FlashCatSender, RelayType, SenderInteractionMessage};
 use tokio_stream::StreamExt;
+
+use flash_cat_common::{Shutdown, proto::ClientType, utils::gen_share_code};
+use flash_cat_core::{RelayType, SenderInteractionMessage, sender::FlashCatSender};
 
 use crate::progress::Progress;
 

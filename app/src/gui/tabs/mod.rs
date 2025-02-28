@@ -1,6 +1,6 @@
 use iced::{
+    Element, Task,
     widget::scrollable::{self, Id, RelativeOffset},
-    Task, Element,
 };
 use receiver_tab::{Message as ReceiverMessage, ReceiverTab};
 use sender_tab::{Message as SenderMessage, SenderTab};

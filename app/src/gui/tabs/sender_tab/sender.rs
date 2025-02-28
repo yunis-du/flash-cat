@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use flash_cat_core::sender::FlashCatSender;
-use flash_cat_core::SenderInteractionMessage;
 use iced::futures::{SinkExt, Stream, StreamExt};
 use iced::stream::try_channel;
 
-use super::{SenderNotification, SENDER_NOTIFICATION};
+use flash_cat_core::{SenderInteractionMessage, sender::FlashCatSender};
+
+use super::{SENDER_NOTIFICATION, SenderNotification};
 
 pub fn send(fcs: Arc<FlashCatSender>) -> iced::Subscription<Result<(u64, Progress), Error>> {
     iced::Subscription::run_with_id(0, run(fcs).map(move |progress| progress))

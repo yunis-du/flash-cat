@@ -51,7 +51,11 @@ impl Progress {
     pub fn skip(&self, file_id: u64) {
         if let Some(progress_bar) = self.progress_bar_map.get(&file_id) {
             progress_bar.finish_and_clear();
-            println!("skip '{}'     {}", progress_bar.prefix(), progress_bar.message());
+            println!(
+                "skip '{}'     {}",
+                progress_bar.prefix(),
+                progress_bar.message()
+            );
         }
     }
 

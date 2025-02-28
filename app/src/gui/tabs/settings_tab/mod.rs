@@ -5,12 +5,12 @@ mod general_widget;
 use about_widget::{About, Message as AboutMessage};
 use appearance_widget::{Appearance, Message as AppearanceMessage};
 use general_widget::{General, Message as GeneralMessage};
+use iced::{Alignment, Length};
 use iced::{
+    Element, Task,
     widget::scrollable::{RelativeOffset, Viewport},
     widget::{column, scrollable},
-    Element, Task,
 };
-use iced::{Alignment, Length};
 
 use crate::gui::assets::icons::GEAR_WIDE_CONNECTED;
 use crate::gui::styles;

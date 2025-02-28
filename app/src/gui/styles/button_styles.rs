@@ -1,4 +1,4 @@
-use iced::theme::{palette, Theme};
+use iced::theme::{Theme, palette};
 use iced::widget::button::{Status, Style};
 use iced::{Background, Border};
 

@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use iced::{
+    Element, Font, Length, Task,
     font::Weight,
     widget::{column, container, image, row, text},
-    Element, Font, Length, Task,
 };
 use tabs::{
-    settings_tab::settings_config::{self, SETTINGS},
     Message as TabsControllerMessage, TabId, TabsController,
+    settings_tab::settings_config::{self, SETTINGS},
 };
 use title_bar::{Message as TitleBarMessage, TitleBar};
 
@@ -101,7 +101,7 @@ impl Default for FlashCatApp {
 }
 
 pub mod title_bar {
-    use iced::widget::{container, horizontal_space, mouse_area, row, svg, text, Row};
+    use iced::widget::{Row, container, horizontal_space, mouse_area, row, svg, text};
     use iced::{Alignment, Length};
 
     use crate::gui::{styles, tabs::TabLabel};

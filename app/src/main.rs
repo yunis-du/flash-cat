@@ -1,8 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use anyhow::Result;
-use flash_cat_app::gui::{assets, FlashCatApp};
-use iced::{window, Font, Settings, Size};
+use iced::{Font, Settings, Size, window};
+
+use flash_cat_app::gui::{FlashCatApp, assets};
 
 fn main() -> Result<()> {
     let icon = window::icon::from_file_data(assets::logos::ICON_LOGO, None).ok();

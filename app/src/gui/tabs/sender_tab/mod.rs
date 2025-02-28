@@ -1,28 +1,28 @@
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, LazyLock, RwLock,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
 
-use flash_cat_core::sender::FlashCatSender;
 use iced::{
-    font, mouse,
+    Alignment, Element, Font, Length, Task, font, mouse,
     widget::{button, column, container, horizontal_space, mouse_area, row, scrollable, svg, text},
-    Alignment, Element, Font, Length, Task,
 };
 use iced::{
-    widget::{
-        scrollable::{Id, RelativeOffset, Viewport},
-        Column,
-    },
     Padding,
+    widget::{
+        Column,
+        scrollable::{Id, RelativeOffset, Viewport},
+    },
 };
-use sender::{send, Error, Progress};
+use sender::{Error, Progress, send};
 
-use super::{settings_tab::settings_config::SETTINGS, Tab};
+use flash_cat_core::sender::FlashCatSender;
+
+use super::{Tab, settings_tab::settings_config::SETTINGS};
 use crate::{
     folder::{pick_files, pick_floders},
     gui::{
@@ -37,7 +37,7 @@ use flash_cat_common::{
     consts::PUBLIC_RELAY,
     proto::ClientType,
     utils::{
-        fs::{collect_files, FileCollector},
+        fs::{FileCollector, collect_files},
         gen_share_code,
     },
 };
@@ -344,14 +344,16 @@ impl SenderTab {
             pick_files_button = pick_files_button.on_press(Message::PickFiles);
             pick_floders_button = pick_floders_button.on_press(Message::PickFloders);
         }
-        let pick = column![row![
-            text("Pick").size(16),
-            horizontal_space(),
-            row![pick_files_button, pick_floders_button]
-                .align_y(Alignment::Center)
-                .spacing(5),
+        let pick = column![
+            row![
+                text("Pick").size(16),
+                horizontal_space(),
+                row![pick_files_button, pick_floders_button]
+                    .align_y(Alignment::Center)
+                    .spacing(5),
+            ]
+            .align_y(Alignment::Center)
         ]
-        .align_y(Alignment::Center)]
         .padding(5);
 
         let mut send_button = button(row![
@@ -419,9 +421,11 @@ impl SenderTab {
                         .style(styles::svg_styles::colored_svg_theme)
                         .height(20)
                         .width(20);
-                    row![button(copy_icon)
-                        .style(styles::button_styles::transparent_button_theme)
-                        .on_press(Message::CopySharCode)]
+                    row![
+                        button(copy_icon)
+                            .style(styles::button_styles::transparent_button_theme)
+                            .on_press(Message::CopySharCode)
+                    ]
                 }
             ]
             .spacing(5)

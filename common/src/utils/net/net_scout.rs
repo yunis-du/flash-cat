@@ -131,7 +131,8 @@ mod test {
     #[tokio::test]
     async fn broadcast() {
         let content = b"broadcast_test0123456789abcdefg123";
-        let mut broadcast = NetScout::new(content.to_vec(), Duration::from_secs(60), Shutdown::new());
+        let mut broadcast =
+            NetScout::new(content.to_vec(), Duration::from_secs(60), Shutdown::new());
         if let Err(err) = broadcast.broadcast(2018).await {
             println!("broadcast failed, {err}");
         }

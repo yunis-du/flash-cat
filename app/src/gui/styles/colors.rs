@@ -1,4 +1,4 @@
-use iced::{color, Color};
+use iced::{Color, color};
 
 /// The accent color for the program
 pub fn accent_color() -> Color {

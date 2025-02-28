@@ -11,7 +11,7 @@ use anyhow::Result;
 #[cfg(feature = "progress")]
 use indicatif::{ProgressBar, ProgressStyle};
 use walkdir::WalkDir;
-use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
+use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 use crate::Shutdown;
 
@@ -170,11 +170,7 @@ pub fn pick_up_folder<P: AsRef<Path>>(paths: &[P]) -> Vec<PathBuf> {
         .filter_map(|p| Some(p.as_ref()))
         .filter_map(|p| {
             if let Ok(m) = p.metadata() {
-                if m.is_dir() {
-                    Some(p.to_owned())
-                } else {
-                    None
-                }
+                if m.is_dir() { Some(p.to_owned()) } else { None }
             } else {
                 None
             }
@@ -238,7 +234,11 @@ pub fn zip_folder<P: AsRef<Path>>(file_name: String, path: P, shutdown: Shutdown
         .any(|entry| {
             let path = entry.path();
             let path_string = path.to_string_lossy().as_ref().to_string();
-            let path_in_zip = format!("{}/{}", root_dir, path_string.replace(folder_path.as_str(), ""));
+            let path_in_zip = format!(
+                "{}/{}",
+                root_dir,
+                path_string.replace(folder_path.as_str(), "")
+            );
             if path.is_dir() {
                 if let Ok(read_dir) = fs::read_dir(path) {
                     if read_dir.count() == 0 {

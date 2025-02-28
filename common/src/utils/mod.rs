@@ -1,7 +1,7 @@
 use std::time::{Duration, SystemTime};
 
 use indicatif::{HumanBytes, HumanDuration};
-use rand::{distr::Alphanumeric, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, distr::Alphanumeric};
 
 pub mod fs;
 pub mod net;

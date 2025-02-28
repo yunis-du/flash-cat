@@ -2,11 +2,12 @@ use std::time::Instant;
 
 use anyhow::Result;
 use bytes::Bytes;
-use flash_cat_common::{
-    proto::{relay_update::RelayMessage, RelayInfo},
-    Shutdown,
-};
 use parking_lot::Mutex;
+
+use flash_cat_common::{
+    Shutdown,
+    proto::{RelayInfo, relay_update::RelayMessage},
+};
 
 #[derive(Debug, Clone)]
 pub struct Metadata {

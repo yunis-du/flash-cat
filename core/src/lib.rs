@@ -1,5 +1,11 @@
 use std::time::Duration;
 
+use anyhow::Result;
+use bytes::Bytes;
+use tonic::transport::Endpoint;
+
+use flash_cat_common::consts::{DEFAULT_HTTP2_KEEPALIVE_INTERVAL, DEFAULT_HTTP2_KEEPALIVE_TIMEOUT};
+
 pub mod receiver;
 pub mod sender;
 
@@ -83,4 +89,11 @@ pub struct RecvNewFile {
     pub filename: String,
     pub path: String,
     pub size: u64,
+}
+
+fn get_endpoint(s: impl Into<Bytes>) -> Result<Endpoint> {
+    let endpoint = Endpoint::from_shared(s.into())?
+        .http2_keep_alive_interval(DEFAULT_HTTP2_KEEPALIVE_INTERVAL)
+        .keep_alive_timeout(DEFAULT_HTTP2_KEEPALIVE_TIMEOUT);
+    Ok(endpoint)
 }

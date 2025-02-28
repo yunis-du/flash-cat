@@ -111,10 +111,10 @@ impl Relay {
     /// Run the application server, listening on a stream of connections.
     pub async fn listen(&self, addr: SocketAddr) -> Result<()> {
         let state = self.state.clone();
-        let terminated = self.shutdown.wait();
+        let shutdown_signal = self.shutdown.clone();
         tokio::spawn(async move {
             tokio::select! {
-                _ = terminated => {}
+                _ = shutdown_signal.wait() => {}
                 _ = state.close_old_sessions() => {}
             }
         });

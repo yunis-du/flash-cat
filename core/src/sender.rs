@@ -3,28 +3,26 @@ use std::{net::SocketAddr, path::Path, pin::Pin, sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use flash_cat_common::{
-    compare_versions,
+    Shutdown, compare_versions,
     consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY},
     crypt::encryptor::Encryptor,
     proto::{
+        Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, FileData, FileDone, Id,
+        JoinRequest, NewFileRequest, RelayInfo, RelayUpdate, SendRequest, SenderUpdate,
         join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
-        relay_update::RelayMessage, sender_update::SenderMessage, Character, ClientType,
-        CloseRequest, Confirm, Done, FileConfirm, FileData, FileDone, Id, JoinRequest,
-        NewFileRequest, RelayInfo, RelayUpdate, SendRequest, SenderUpdate,
+        relay_update::RelayMessage, sender_update::SenderMessage,
     },
     utils::{
-        fs::{collect_files, is_idr, paths_exist, remove_files, zip_folder, FileCollector},
-        get_time_ms,
+        fs::{FileCollector, collect_files, is_idr, paths_exist, remove_files, zip_folder},
         net::{find_available_port, get_local_ip, net_scout::NetScout},
     },
-    Shutdown,
 };
 use flash_cat_relay::{built_info, relay::Relay};
-use tokio::{fs::File, io::AsyncReadExt, signal::ctrl_c, sync::mpsc, time::MissedTickBehavior};
-use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
+use tokio::{fs::File, io::AsyncReadExt, signal::ctrl_c, sync::mpsc};
+use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tonic::transport::Endpoint;
 
-use crate::{Progress, RelayType, SenderInteractionMessage, PING_INTERVAL};
+use crate::{Progress, RelayType, SenderInteractionMessage, get_endpoint};
 
 /// Broadcast local relay addr timeout.
 pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -106,7 +104,7 @@ impl FlashCatSender {
                 }
                 Err(_) => specify_relay,
             };
-            let endpoint = Endpoint::from_shared(specify_relay_addr)?;
+            let endpoint = get_endpoint(specify_relay_addr)?;
             self.connect_relay(
                 RelayType::Specify,
                 None,
@@ -129,7 +127,7 @@ impl FlashCatSender {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
             // connect local relay
-            let endpoint = Endpoint::from_shared(format!("http://127.0.0.1:{local_relay_port}"))?;
+            let endpoint = get_endpoint(format!("http://127.0.0.1:{local_relay_port}"))?;
             self.connect_relay(
                 RelayType::Local,
                 None,
@@ -140,7 +138,7 @@ impl FlashCatSender {
             .await?;
 
             // connect public relay
-            let endpoint = Endpoint::from_shared(format!("https://{PUBLIC_RELAY}"))?;
+            let endpoint = get_endpoint(format!("https://{PUBLIC_RELAY}"))?;
             self.connect_relay(
                 RelayType::Public,
                 Some(local_relay_port),
@@ -278,7 +276,7 @@ impl FlashCatSender {
                         (join_success.relay, join_success.client_latest_version)
                     }
                     join_response::JoinResponseMessage::Failed(join_failed) => {
-                        return Err(anyhow::Error::msg(join_failed.error_msg))
+                        return Err(anyhow::Error::msg(join_failed.error_msg));
                     }
                 }
             } else {
@@ -315,7 +313,7 @@ impl FlashCatSender {
         match relay {
             Some(relay_info) => {
                 // Directly connect to Relay, improve performance
-                endpoint = Endpoint::from_shared(format!(
+                endpoint = get_endpoint(format!(
                     "http://{}:{}",
                     relay_info.relay_ip, relay_info.relay_port
                 ))?;
@@ -370,8 +368,6 @@ impl FlashCatSender {
 
         let (confirm_tx, confirm_rx) = async_channel::bounded(10);
 
-        let mut ping_interval = tokio::time::interval(PING_INTERVAL);
-        ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             let message = tokio::select! {
                 _ = shutdown.wait() => {
@@ -380,11 +376,6 @@ impl FlashCatSender {
                     })
                     .await?;
                     return Ok(());
-                }
-                // Send periodic pings to the relay.
-                _ = ping_interval.tick() => {
-                    Self::send_msg_to_relay(&tx, RelayMessage::Ping(get_time_ms())).await?;
-                    continue;
                 }
                 item = messages.next() => {
                     item.context("server closed connection")??
