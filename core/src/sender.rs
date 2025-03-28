@@ -529,7 +529,7 @@ impl FlashCatSender {
 
             let file_confirm = notify.recv().await?;
 
-            if file_confirm.confirm == Confirm::Reject.into() {
+            if file_confirm.confirm == Confirm::Reject as i32 {
                 Self::send_msg_to_stream(
                     sender_stream_tx,
                     SenderInteractionMessage::ContinueFile(file_confirm.file_id),
