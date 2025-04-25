@@ -57,6 +57,8 @@ trap {
 function Get-SystemArch {
     if ([Environment]::Is64BitOperatingSystem) {
         return "x86_64"
+    } elseif ([Environment]::Is32BitOperatingSystem) {
+        return "i686"
     } else {
         Write-Host "Unsupported architecture" -ForegroundColor Red
         exit 1
