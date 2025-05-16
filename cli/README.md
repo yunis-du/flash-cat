@@ -20,7 +20,7 @@ cargo build --release -p flash_cat_cli --target x86_64-unknown-linux-musl
 - generate rpm package
 
 ```bash
-cargo generate-rpm -p cli --variant x86_64-unknown-linux-musl --target x86_64-unknown-linux-musl 
+cargo generate-rpm -p cli --variant x86_64-unknown-linux-musl --target x86_64-unknown-linux-musl
 ```
 
 ### Build aarch64 RPM
