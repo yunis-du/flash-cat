@@ -17,13 +17,14 @@ async-channel.workspace = true
 bytes.workspace = true
 clap.workspace = true
 dashmap.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+rustls.workspace = true
+serde.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tonic.workspace = true
-log.workspace = true
-parking_lot.workspace = true
-serde.workspace = true
-tonic-reflection = "0.12"
+tonic-reflection.workspace = true
 tower = { version = "0.5", features = ["steer"] }
 tower-http = { version = "0.6", features = ["fs", "redirect", "trace"] }
 
