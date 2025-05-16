@@ -36,10 +36,9 @@ log = "0.4"
 parking_lot = "0.12"
 prost = "0"
 rand = "0.9"
-rustls = "0.23"
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-tonic = { version = "0.13", features = ["tls-webpki-roots"] }
+tonic = { version = "0.13", features = ["tls-ring", "tls-webpki-roots"] }
 tonic-build = "0.13"
 tonic-reflection = "0.13"
