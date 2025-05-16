@@ -40,7 +40,7 @@ maintainer = "Yunis <yunis@88.com>"
 url = "https://github.com/yunis-du/flash-cat"
 assets = [
     # binary
-    { source = "target/x86_64-unknown-linux-musl/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
+    { source = "target/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
 ]
 
 [package.metadata.generate-rpm.variants.aarch64-unknown-linux-musl]
@@ -52,7 +52,7 @@ maintainer = "Yunis <yunis@88.com>"
 url = "https://github.com/yunis-du/flash-cat"
 assets = [
     # binary
-    { source = "target/aarch64-unknown-linux-musl/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
+    { source = "target/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
 ]
 
 # [package.metadata.generate-rpm.requires]
@@ -66,7 +66,7 @@ extended-description = "Securely send the file folder from one computer to anoth
 section = "main"
 assets = [
     # binary
-    { source = "../target/x86_64-unknown-linux-musl/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
+    { source = "target/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
 ]
 
 [package.metadata.deb.variants.aarch64-unknown-linux-musl]
@@ -77,5 +77,5 @@ extended-description = "Securely send the file folder from one computer to anoth
 section = "main"
 assets = [
     # binary
-    { source = "../target/aarch64-unknown-linux-musl/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
+    { source = "target/release/flash-cat", dest = "/usr/bin/flash-cat", mode = "755" },
 ]
