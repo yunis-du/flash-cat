@@ -18,6 +18,7 @@ use crate::progress::Progress;
 pub struct Send {
     share_code: String,
     sender: FlashCatSender,
+    relay: Option<String>,
 
     shutdown: Shutdown,
 }
@@ -39,10 +40,11 @@ impl Send {
             .collect::<Vec<_>>();
         let share_code = gen_share_code();
         let sender =
-            FlashCatSender::new(share_code.clone(), relay, files, zip, ClientType::Cli).await?;
+            FlashCatSender::new(share_code.clone(), relay.clone(), files, zip, ClientType::Cli).await?;
         Ok(Self {
             share_code,
             sender,
+            relay,
             shutdown: Shutdown::new(),
         })
     }
@@ -66,7 +68,12 @@ impl Send {
         println!("Share code is: {}", self.share_code);
         println!("On the other computer run:");
         println!();
-        println!("flash-cat recv {}", self.share_code);
+        if let Some(relay) = &self.relay {
+            println!("flash-cat recv {} --relay {}", self.share_code, relay);
+        } else {
+            println!("flash-cat recv {}", self.share_code);
+        }
+        
         let mut progress = Progress::new(
             file_collector.num_files,
             file_collector.max_file_name_length,
