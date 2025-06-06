@@ -30,6 +30,9 @@ pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
 /// Sender stream
 pub type SenderStream = Pin<Box<dyn Stream<Item = SenderInteractionMessage> + Send>>;
 
+/// Send buffer size: 32Kib
+const SEND_BUFF_SIZE: usize = 32 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct FlashCatSender {
     zip_files: Vec<String>,
@@ -553,7 +556,7 @@ impl FlashCatSender {
             let mut read_file = File::open(send_file.access_path.as_str()).await?;
             let mut position = 0;
             loop {
-                let mut buffer = BytesMut::with_capacity(10240); // 10Kib
+                let mut buffer = BytesMut::with_capacity(SEND_BUFF_SIZE);
                 let read_length = read_file.read_buf(&mut buffer).await?;
                 if read_length == 0 {
                     Self::send_msg_to_relay(
