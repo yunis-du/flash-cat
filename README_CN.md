@@ -82,3 +82,35 @@ flash-cat recv xx-xxxx-xxxx
 ```bash
 flash-cat relay
 ```
+
+## 指定中继
+
+### 通过命令行参数
+发送:
+```bash
+flash-cat send files or folder --relay 127.0.0.1:6880
+
+...
+Share code is: xx-xxxx-xxxx
+...
+```
+接收:
+```bash
+flash-cat recv xx-xxxx-xxxx --relay 127.0.0.1:6880
+```
+
+### 通过环境变量
+发送:
+```bash
+export FLASH_CAT_RELAY=127.0.0.1:6880
+flash-cat send files or folder
+
+...
+Share code is: xx-xxxx-xxxx
+...
+```
+接收:
+```bash
+export FLASH_CAT_RELAY=127.0.0.1:6880
+flash-cat recv xx-xxxx-xxxx
+```

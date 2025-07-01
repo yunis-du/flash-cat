@@ -84,3 +84,35 @@ You can deploy your own relay server to handle file transfers within your local 
 ```bash
 flash-cat relay
 ```
+
+## Specify relay
+
+### command-line parameters
+send:
+```bash
+flash-cat send files or folder --relay 127.0.0.1:6880
+
+...
+Share code is: xx-xxxx-xxxx
+...
+```
+receive:
+```bash
+flash-cat recv xx-xxxx-xxxx --relay 127.0.0.1:6880
+```
+
+### environmental variable
+send:
+```bash
+export FLASH_CAT_RELAY=127.0.0.1:6880
+flash-cat send files or folder
+
+...
+Share code is: xx-xxxx-xxxx
+...
+```
+receive:
+```bash
+export FLASH_CAT_RELAY=127.0.0.1:6880
+flash-cat recv xx-xxxx-xxxx
+```
