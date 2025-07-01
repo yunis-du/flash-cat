@@ -128,6 +128,33 @@ impl Receive {
                             recv_new_file.size,
                         );
                     }
+                    ReceiverInteractionMessage::BreakPoint(break_point) => {
+                        print!(
+                            "File '{}' is {:.2}% complete. Resume transfer? (Y/n) ",
+                            break_point.filename, break_point.percent
+                        );
+                        stdout().flush()?;
+                        let mut input = String::new();
+                        stdin().read_line(&mut input)?;
+                        let input = input.trim();
+                        if input.to_lowercase() == "y" || input.to_lowercase() == "yes" {
+                            self.receiver
+                                .send_confirm(ReceiverConfirm::BreakPointConfirm((
+                                    true,
+                                    break_point.file_id,
+                                    break_point.position,
+                                )))
+                                .await?;
+                        } else {
+                            self.receiver
+                                .send_confirm(ReceiverConfirm::BreakPointConfirm((
+                                    false,
+                                    break_point.file_id,
+                                    break_point.position,
+                                )))
+                                .await?;
+                        }
+                    }
                     ReceiverInteractionMessage::FileProgress(fp) => {
                         progress.set_position(fp.file_id, fp.position);
                     }

@@ -10,27 +10,34 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use tokio::{fs, io::AsyncWriteExt, sync::mpsc};
+use tokio::{
+    fs,
+    io::{AsyncSeekExt, AsyncWriteExt, SeekFrom},
+    sync::mpsc,
+};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream as TokioReceiverStream};
 use tonic::transport::Endpoint;
 
 use flash_cat_common::{
     Shutdown, compare_versions,
-    consts::PUBLIC_RELAY,
+    consts::{PUBLIC_RELAY, SEND_BUFF_SIZE},
     crypt::encryptor::Encryptor,
     proto::{
-        Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, Id, JoinRequest,
-        ReceiverUpdate, RelayUpdate, join_response, receiver_update::ReceiverMessage,
-        relay_service_client::RelayServiceClient, relay_update::RelayMessage,
-        sender_update::SenderMessage,
+        BreakPointConfirm, Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, Id,
+        JoinRequest, NewFileConfirm, ReceiverUpdate, RelayUpdate, file_confirm::ConfirmMessage,
+        join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
+        relay_update::RelayMessage, sender_update::SenderMessage,
     },
-    utils::{fs::reset_path, net::net_scout::NetScout},
+    utils::{
+        fs::{missing_chunks, reset_path},
+        net::net_scout::NetScout,
+    },
 };
 use flash_cat_relay::built_info;
 
 use crate::{
-    FileDuplication, Progress, ReceiverConfirm, ReceiverInteractionMessage, RecvNewFile, RelayType,
-    SendFilesRequest, get_endpoint,
+    BreakPoint, FileDuplication, Progress, ReceiverConfirm, ReceiverInteractionMessage,
+    RecvNewFile, RelayType, SendFilesRequest, get_endpoint,
 };
 
 static OUT_DIR: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new("".to_string()));
@@ -340,24 +347,64 @@ impl FlashCatReceiver {
                         ReceiverConfirm::FileConfirm((accept, file_id)) => {
                             let file_confirm = if accept {
                                 RelayMessage::Receiver(ReceiverUpdate {
-                                    receiver_message: Some(ReceiverMessage::NewFileConfirm(
+                                    receiver_message: Some(ReceiverMessage::FileConfirm(
                                         FileConfirm {
-                                            file_id: file_id,
-                                            confirm: Confirm::Accept.into(),
+                                            confirm_message: Some(ConfirmMessage::NewFileConfirm(
+                                                NewFileConfirm {
+                                                    file_id: file_id,
+                                                    confirm: Confirm::Accept.into(),
+                                                },
+                                            )),
                                         },
                                     )),
                                 })
                             } else {
                                 RelayMessage::Receiver(ReceiverUpdate {
-                                    receiver_message: Some(ReceiverMessage::NewFileConfirm(
+                                    receiver_message: Some(ReceiverMessage::FileConfirm(
                                         FileConfirm {
-                                            file_id: file_id,
-                                            confirm: Confirm::Reject.into(),
+                                            confirm_message: Some(ConfirmMessage::NewFileConfirm(
+                                                NewFileConfirm {
+                                                    file_id: file_id,
+                                                    confirm: Confirm::Reject.into(),
+                                                },
+                                            )),
                                         },
                                     )),
                                 })
                             };
                             Self::send_msg_to_relay(&tx, file_confirm).await?;
+                        }
+                        ReceiverConfirm::BreakPointConfirm((accept, file_id, position)) => {
+                            let break_point_confirm = if accept {
+                                RelayMessage::Receiver(ReceiverUpdate {
+                                    receiver_message: Some(ReceiverMessage::FileConfirm(
+                                        FileConfirm {
+                                            confirm_message: Some(ConfirmMessage::BreakPointConfirm(
+                                                BreakPointConfirm {
+                                                    file_id: file_id,
+                                                    confirm: Confirm::Accept.into(),
+                                                    position: position,
+                                                },
+                                            )),
+                                        },
+                                    )),
+                                })
+                            } else {
+                                RelayMessage::Receiver(ReceiverUpdate {
+                                    receiver_message: Some(ReceiverMessage::FileConfirm(
+                                        FileConfirm {
+                                            confirm_message: Some(ConfirmMessage::BreakPointConfirm(
+                                                BreakPointConfirm {
+                                                    file_id: file_id,
+                                                    confirm: Confirm::Reject.into(),
+                                                    position: 0,
+                                                },
+                                            )),
+                                        },
+                                    )),
+                                })
+                            };
+                            Self::send_msg_to_relay(&tx, break_point_confirm).await?;
                         }
                     }
                     continue;
@@ -398,10 +445,14 @@ impl FlashCatReceiver {
                             }
                             SenderMessage::NewFileRequest(new_file_req) => {
                                 let accept_msg = RelayMessage::Receiver(ReceiverUpdate {
-                                    receiver_message: Some(ReceiverMessage::NewFileConfirm(
+                                    receiver_message: Some(ReceiverMessage::FileConfirm(
                                         FileConfirm {
-                                            file_id: new_file_req.file_id,
-                                            confirm: Confirm::Accept.into(),
+                                            confirm_message: Some(ConfirmMessage::NewFileConfirm(
+                                                NewFileConfirm {
+                                                    file_id: new_file_req.file_id,
+                                                    confirm: Confirm::Accept.into(),
+                                                },
+                                            )),
                                         },
                                     )),
                                 });
@@ -437,17 +488,12 @@ impl FlashCatReceiver {
                                                     .read(true)
                                                     .open(&absolute_path)
                                                     .await?;
-                                                file.set_permissions(
-                                                    if new_file_req.file_mode > 0 {
-                                                        std::fs::Permissions::from_mode(
-                                                            new_file_req.file_mode,
-                                                        )
-                                                    } else {
-                                                        // Set as the default permissions of the file
-                                                        std::fs::Permissions::from_mode(0o644)
-                                                    },
-                                                )
-                                                .await?;
+                                                let metadata = file.metadata().await?;
+                                                let current_size = metadata.len();
+                                                if current_size < new_file_req.total_size {
+                                                    file.set_len(new_file_req.total_size).await?;
+                                                }
+
                                                 file
                                             })
                                         }
@@ -463,6 +509,28 @@ impl FlashCatReceiver {
                                         }
                                     };
                                     recv_files.insert(new_file_req.file_id, recv_file);
+
+                                    if let Ok((saved_chunks, missing_chunks, percent)) =
+                                        missing_chunks(&absolute_path, SEND_BUFF_SIZE)
+                                    {
+                                        if missing_chunks > 0 {
+                                            Self::send_msg_to_stream(
+                                                receiver_stream_tx,
+                                                ReceiverInteractionMessage::BreakPoint(
+                                                    BreakPoint {
+                                                        file_id: new_file_req.file_id,
+                                                        filename: new_file_req.filename.clone(),
+                                                        position: (saved_chunks
+                                                            * SEND_BUFF_SIZE)
+                                                            as u64,
+                                                        percent,
+                                                    },
+                                                ),
+                                            )
+                                            .await?;
+                                            continue;
+                                        }
+                                    }
 
                                     Self::send_msg_to_stream(
                                         receiver_stream_tx,
@@ -486,6 +554,7 @@ impl FlashCatReceiver {
                                         {
                                             RecvFile::new({
                                                 let file = fs::File::create(&absolute_path).await?;
+                                                file.set_len(new_file_req.total_size).await?;
                                                 file.set_permissions(
                                                     if new_file_req.file_mode > 0 {
                                                         std::fs::Permissions::from_mode(
@@ -509,6 +578,17 @@ impl FlashCatReceiver {
                                 }
 
                                 Self::send_msg_to_relay(&tx, accept_msg).await?;
+                            }
+                            SenderMessage::BreakPoint(break_point) => {
+                                if !recv_files.contains_key(&break_point.file_id) {
+                                    return Err(anyhow::Error::msg("receive file failed"));
+                                }
+                                let recv_file = recv_files.get_mut(&break_point.file_id).unwrap();
+                                recv_file.progress = break_point.position;
+                                recv_file
+                                    .file
+                                    .seek(SeekFrom::Start(break_point.position))
+                                    .await?;
                             }
                             SenderMessage::FileData(file_data) => {
                                 if !recv_files.contains_key(&file_data.file_id) {

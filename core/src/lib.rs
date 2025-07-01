@@ -33,6 +33,7 @@ pub enum ReceiverInteractionMessage {
     SendFilesRequest(SendFilesRequest),
     FileDuplication(FileDuplication),
     RecvNewFile(RecvNewFile),
+    BreakPoint(BreakPoint),
     FileProgress(Progress),
     FileProgressFinish(u64),
     OtherClose,
@@ -66,6 +67,7 @@ pub struct Progress {
 pub enum ReceiverConfirm {
     ReceiveConfirm(bool),
     FileConfirm((bool, u64)),
+    BreakPointConfirm((bool, u64, u64)), // (accept, file_id, start_position)
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +83,14 @@ pub struct FileDuplication {
     pub file_id: u64,
     pub filename: String,
     pub path: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct BreakPoint {
+    pub file_id: u64,
+    pub filename: String,
+    pub position: u64,
+    pub percent: f64,
 }
 
 #[derive(Debug, Clone)]

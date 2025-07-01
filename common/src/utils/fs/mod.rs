@@ -3,7 +3,7 @@ use std::os::unix::fs::MetadataExt;
 use std::{
     cmp::max,
     fs::{self, File},
-    io,
+    io::{self, Read},
     path::{Path, PathBuf},
 };
 
@@ -368,4 +368,54 @@ pub fn reset_path(path: &str) -> String {
     {
         path.replace("/", "\\")
     }
+}
+
+/// Check the file for missing (all-zero) chunks and calculate the percentage of saved data.
+///
+/// # Arguments
+/// * `path` - The path to the file to be checked.
+/// * `chunk_size` - The size of each chunk (in bytes) to check for missing data.
+///
+/// # Returns
+/// * `Ok((saved_chunks, missing_chunks, percent))`
+///     - `saved_chunks`: Number of non-empty (saved) chunks found in the file.
+///     - `missing_chunks`: Number of empty (all-zero) chunks found at the end of the file.
+///     - `percent`: Percentage of the file that is non-empty (saved), rounded to two decimal places.
+///
+/// # Errors
+/// Returns an error if the file cannot be opened or read.
+pub fn missing_chunks(path: impl AsRef<Path>, chunk_size: usize) -> Result<(usize, usize, f64)> {
+    let f = File::open(path)?;
+    let fsize = f.metadata()?.len();
+
+    let empty_buffer = vec![0u8; chunk_size];
+    let mut saved_chunks = 0;
+    let mut missing_chunks = 0;
+
+    let mut reader = io::BufReader::new(f);
+    let mut buffer = vec![0u8; chunk_size];
+
+    loop {
+        let bytes_read = reader.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        if buffer[..bytes_read] == empty_buffer[..bytes_read] {
+            // empty chunk
+            missing_chunks += 1;
+        } else {
+            saved_chunks += 1;
+            if missing_chunks > 0 {
+                // add missing chunks to saved chunks
+                saved_chunks += missing_chunks;
+                missing_chunks = 0;
+            }
+        }
+    }
+
+    let percent =
+        ((saved_chunks * chunk_size) as f64 / fsize as f64 * 100.0 * 100.0).round() / 100.0;
+
+    Ok((saved_chunks, missing_chunks, percent))
 }

@@ -4,13 +4,14 @@ use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use flash_cat_common::{
     Shutdown, compare_versions,
-    consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY},
+    consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY, SEND_BUFF_SIZE},
     crypt::encryptor::Encryptor,
     proto::{
         Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, FileData, FileDone, Id,
         JoinRequest, NewFileRequest, RelayInfo, RelayUpdate, SendRequest, SenderUpdate,
-        join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
-        relay_update::RelayMessage, sender_update::SenderMessage,
+        file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage,
+        relay_service_client::RelayServiceClient, relay_update::RelayMessage,
+        sender_update::SenderMessage, BreakPoint,
     },
     utils::{
         fs::{FileCollector, collect_files, is_idr, paths_exist, remove_files, zip_folder},
@@ -18,7 +19,12 @@ use flash_cat_common::{
     },
 };
 use flash_cat_relay::{built_info, relay::Relay};
-use tokio::{fs::File, io::AsyncReadExt, signal::ctrl_c, sync::mpsc};
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, AsyncSeekExt, SeekFrom},
+    signal::ctrl_c,
+    sync::mpsc,
+};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tonic::transport::Endpoint;
 
@@ -29,9 +35,6 @@ pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Sender stream
 pub type SenderStream = Pin<Box<dyn Stream<Item = SenderInteractionMessage> + Send>>;
-
-/// Send buffer size: 32Kib
-const SEND_BUFF_SIZE: usize = 32 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct FlashCatSender {
@@ -474,8 +477,8 @@ impl FlashCatSender {
                                     .await?;
                                 }
                             }
-                            ReceiverMessage::NewFileConfirm(new_file_confirm) => {
-                                confirm_tx.send(new_file_confirm).await?;
+                            ReceiverMessage::FileConfirm(file_confirm) => {
+                                confirm_tx.send(file_confirm).await?;
                             }
                         }
                     }
@@ -532,29 +535,59 @@ impl FlashCatSender {
 
             let file_confirm = notify.recv().await?;
 
-            if file_confirm.confirm == Confirm::Reject as i32 {
-                Self::send_msg_to_stream(
-                    sender_stream_tx,
-                    SenderInteractionMessage::ContinueFile(file_confirm.file_id),
-                )
-                .await?;
-                continue;
-            }
+            let mut position = 0;
 
-            if file_confirm.file_id != send_file.file_id {
-                Self::send_msg_to_stream(
-                    sender_stream_tx,
-                    SenderInteractionMessage::Error("File order is wrong".to_string()),
-                )
-                .await?;
-                continue;
+            if let Some(confirm_message) = file_confirm.confirm_message {
+                match confirm_message {
+                    ConfirmMessage::NewFileConfirm(new_file_confirm) => {
+                        if new_file_confirm.file_id != send_file.file_id {
+                            Self::send_msg_to_stream(
+                                sender_stream_tx,
+                                SenderInteractionMessage::Error("File order is wrong".to_string()),
+                            )
+                            .await?;
+                            continue;
+                        }
+                        if new_file_confirm.confirm == Confirm::Reject.into() {
+                            Self::send_msg_to_stream(
+                                sender_stream_tx,
+                                SenderInteractionMessage::ContinueFile(new_file_confirm.file_id),
+                            )
+                            .await?;
+                            continue;
+                        }
+                    }
+                    ConfirmMessage::BreakPointConfirm(break_point_confirm) => {
+                        if break_point_confirm.file_id != send_file.file_id {
+                            Self::send_msg_to_stream(
+                                sender_stream_tx,
+                                SenderInteractionMessage::Error("File order is wrong".to_string()),
+                            )
+                            .await?;
+                            continue;
+                        }
+                        if break_point_confirm.confirm == Confirm::Accept.into() {
+                            position = break_point_confirm.position;
+                            Self::send_msg_to_relay(
+                                &tx,
+                                RelayMessage::Sender(SenderUpdate {
+                                    sender_message: Some(SenderMessage::BreakPoint(BreakPoint {
+                                        file_id: send_file.file_id,
+                                        position,
+                                    })),
+                                }),
+                            )
+                            .await?;
+                        }
+                    }
+                }
             }
 
             if send_file.empty_dir {
                 continue;
             }
             let mut read_file = File::open(send_file.access_path.as_str()).await?;
-            let mut position = 0;
+            read_file.seek(SeekFrom::Start(position)).await?;
             loop {
                 let mut buffer = BytesMut::with_capacity(SEND_BUFF_SIZE);
                 let read_length = read_file.read_buf(&mut buffer).await?;

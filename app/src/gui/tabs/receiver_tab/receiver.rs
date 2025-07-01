@@ -71,6 +71,14 @@ pub fn run(fcr: Arc<FlashCatReceiver>) -> impl Stream<Item = Result<(u64, Progre
                         ))
                         .await;
                 }
+                ReceiverInteractionMessage::BreakPoint(break_point) => {
+                    let _ = sender
+                        .send((
+                            break_point.file_id,
+                            Progress::Received(break_point.position as f32),
+                        ))
+                        .await;
+                }
                 ReceiverInteractionMessage::FileProgress(fp) => {
                     let _ = sender
                         .send((fp.file_id, Progress::Received(fp.position as f32)))

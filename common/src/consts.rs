@@ -20,3 +20,6 @@ pub const DEFAULT_HTTP2_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
 
 /// The default http2 keepalive timeout.
 pub const DEFAULT_HTTP2_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Send buffer size: 32Kib
+pub const SEND_BUFF_SIZE: usize = 32 * 1024;

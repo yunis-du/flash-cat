@@ -103,8 +103,9 @@ message SenderUpdate {
   oneof sender_message {
     SendRequest send_request = 1; // Send request.
     NewFileRequest new_file_request = 2; // New file request.
-    FileData file_data = 3; // File data.
-    FileDone file_done = 4; // File done.
+    BreakPoint break_point = 3; // Break point.
+    FileData file_data = 4; // File data.
+    FileDone file_done = 5; // File done.
   }
 }
 
@@ -126,6 +127,12 @@ message NewFileRequest {
   bool is_empty_dir = 6; // Whether it is an empty directory.
 }
 
+// Break point.
+message BreakPoint {
+  uint64 file_id = 1; // File id.
+  uint64 position = 2; // Position.
+}
+
 // File data.
 message FileData {
   uint64 file_id = 1; // File id.
@@ -141,14 +148,29 @@ message FileDone {
 message ReceiverUpdate {
   oneof receiver_message {
     Confirm share_confirm = 1; // Share confirm.
-    FileConfirm new_file_confirm = 2; // New file confirm.
+    FileConfirm file_confirm = 2; // File confirm.
   }
 }
 
 // File confirm.
 message FileConfirm {
+  oneof confirm_message {
+    NewFileConfirm new_file_confirm = 1; // New file confirm.
+    BreakPointConfirm break_point_confirm = 2; // Break point confirm.
+  }
+}
+
+// New file confirm.
+message NewFileConfirm {
   uint64 file_id = 1; // File id.
   Confirm confirm = 2; // Confirm.
+}
+
+// Break point confirm.
+message BreakPointConfirm {
+  uint64 file_id = 1; // File id.
+  uint64 position = 2; // Position.
+  Confirm confirm = 3; // Confirm.
 }
 
 // Confirm.
