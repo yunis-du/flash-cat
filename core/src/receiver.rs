@@ -513,15 +513,14 @@ impl FlashCatReceiver {
                                     if let Ok((saved_chunks, missing_chunks, percent)) =
                                         missing_chunks(&absolute_path, SEND_BUFF_SIZE)
                                     {
-                                        if missing_chunks > 0 {
+                                        if missing_chunks > 0 && saved_chunks > 0 && percent > 0.0 {
                                             Self::send_msg_to_stream(
                                                 receiver_stream_tx,
                                                 ReceiverInteractionMessage::BreakPoint(
                                                     BreakPoint {
                                                         file_id: new_file_req.file_id,
                                                         filename: new_file_req.filename.clone(),
-                                                        position: (saved_chunks
-                                                            * SEND_BUFF_SIZE)
+                                                        position: (saved_chunks * SEND_BUFF_SIZE)
                                                             as u64,
                                                         percent,
                                                     },
