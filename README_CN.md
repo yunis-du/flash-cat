@@ -34,14 +34,15 @@ irm https://download.yunisdu.com/flash-cat/install_cn.ps1 | iex
 yum包管理器系统，如Fedora、RockyLinux等。目前，只支持amd64和arm64架构
 
 ```bash
-sudo curl -o /etc/yum.repos.d/flash-cat.repo http://repo.yunisdu.com/rpm/flash-cat/flash-cat.repo && sudo yum install flash-cat -y
+sudo curl -o /etc/yum.repos.d/flash-cat.repo https://repo.yunisdu.com/rpm/flash-cat/flash-cat.repo && sudo yum install flash-cat -y
 ```
 
 ### 使用 apt-get 安装
 基于apt包管理器的系统（如Debian、Ubuntu及其衍生产品）。
 
 ```bash
-echo "deb [trusted=yes] http://repo.yunisdu.com/apt/ flash-cat main" | sudo tee /etc/apt/sources.list.d/flash-cat.list && sudo apt-get update && sudo apt-get install flash-cat
+sudo curl -fsSL https://repo.yunisdu.com/apt/flash-cat-archive-keyring.gpg -o /usr/share/keyrings/flash-cat-archive-keyring.gpg &&
+echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/flash-cat-archive-keyring.gpg] https://repo.yunisdu.com/apt/ flash-cat main" | sudo tee /etc/apt/sources.list.d/flash-cat.list && sudo apt-get update && sudo apt-get install flash-cat
 ```
 
 ### 在macOS上，可以通过Homebrew安装最新版本

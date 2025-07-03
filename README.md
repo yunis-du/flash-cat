@@ -36,14 +36,15 @@ irm https://download.yunisdu.com/flash-cat/install_cn.ps1 | iex
 Systems for yum package managers, such as Fedora, RockyLinux, etc. Currently, only amd64 and arm64 architectures are supported.
 
 ```bash
-sudo curl -o /etc/yum.repos.d/flash-cat.repo http://repo.yunisdu.com/rpm/flash-cat/flash-cat.repo && sudo yum install flash-cat -y
+sudo curl -o /etc/yum.repos.d/flash-cat.repo https://repo.yunisdu.com/rpm/flash-cat/flash-cat.repo && sudo yum install flash-cat -y
 ```
 
 ### Use apt-get install
 Systems for apt package manager-based (such as Debian, Ubuntu, and their derivatives).
 
 ```bash
-echo "deb [trusted=yes] http://repo.yunisdu.com/apt/ flash-cat main" | sudo tee /etc/apt/sources.list.d/flash-cat.list && sudo apt-get update && sudo apt-get install flash-cat
+sudo curl -fsSL https://repo.yunisdu.com/apt/flash-cat-archive-keyring.gpg -o /usr/share/keyrings/flash-cat-archive-keyring.gpg &&
+echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/flash-cat-archive-keyring.gpg] https://repo.yunisdu.com/apt/ flash-cat main" | sudo tee /etc/apt/sources.list.d/flash-cat.list && sudo apt-get update && sudo apt-get install flash-cat
 ```
 
 ### On macOS you can install the latest release with Homebrew
