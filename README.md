@@ -5,7 +5,8 @@ English | [简体中文](./README_CN.md)
 Securely send the file folder from one computer to another computer.
 
 - **symmetric encryption** (using aes-gcm)
-- allows **multiple file** transfers
+- support **multiple file** transfers
+- support **resume transfer from breakpoint**
 - easy **cross-platform** transfers (Windows, Linux, Mac)
 
 ![dream_TradingCard](./flash-cat-demo.gif)

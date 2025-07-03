@@ -4,6 +4,7 @@
 
 - **对称加密** (使用 aes-gcm)
 - 支持**多文件**传输
+- 支持**断点续传**
 - 简单的**跨平台**传输 (Windows, Linux, Mac)
 
 ![dream_TradingCard](./flash-cat-demo.gif)
@@ -75,7 +76,7 @@ Share code is: xx-xxxx-xxxx
 flash-cat recv xx-xxxx-xxxx
 ```
 
-## 部署你自己的终极服务
+## 部署你自己的中继服务
 
 您可以部署自己的中继服务器来处理本地网络或互联网上的文件传输。
 
