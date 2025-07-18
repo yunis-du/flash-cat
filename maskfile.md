@@ -31,6 +31,7 @@ mask build app --arch x86_64 --target apple
 mask build app --arch aarch64 --target apple
 mask build app --arch x86_64 --target windows
 mask build deb --arch x86_64
+mask build deb --arch aarch64
 mask build rpm --arch x86_64
 mask build rpm --arch aarch64
 ```
