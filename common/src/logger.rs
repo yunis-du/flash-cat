@@ -3,7 +3,10 @@ use std::path::Path;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::LevelFilter;
 
-pub fn init_logger<P: AsRef<Path>>(log_level: String, log_file: P) {
+pub fn init_logger<P: AsRef<Path>>(
+    log_level: String,
+    log_file: P,
+) {
     let log_path = Path::new(log_file.as_ref());
     let log_parent_path = log_path.parent();
     if let Some(log_parent_path) = log_parent_path {
@@ -20,17 +23,9 @@ pub fn init_logger<P: AsRef<Path>>(log_level: String, log_file: P) {
         }
     }
 
-    let colors = ColoredLevelConfig::new()
-        .info(Color::Green)
-        .debug(Color::Cyan)
-        .warn(Color::Yellow)
-        .error(Color::Red);
+    let colors = ColoredLevelConfig::new().info(Color::Green).debug(Color::Cyan).warn(Color::Yellow).error(Color::Red);
 
-    let log_level = match std::env::var("RUST_LOG")
-        .unwrap_or(log_level)
-        .to_lowercase()
-        .trim()
-    {
+    let log_level = match std::env::var("RUST_LOG").unwrap_or(log_level).to_lowercase().trim() {
         "off" => LevelFilter::Off,
         "info" => LevelFilter::Info,
         "debug" => LevelFilter::Debug,

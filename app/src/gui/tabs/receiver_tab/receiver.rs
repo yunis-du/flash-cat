@@ -29,75 +29,49 @@ pub fn run(fcr: Arc<FlashCatReceiver>) -> impl Stream<Item = Result<(u64, Progre
                     return if e.contains("NotFound") {
                         Err(Error::ShareCodeNotFound)
                     } else {
-                        Err(Error::OtherErroe(format!(
-                            "An error occurred: {}",
-                            e.to_string()
-                        )))
+                        Err(Error::OtherErroe(format!("An error occurred: {}", e.to_string())))
                     };
                 }
                 ReceiverInteractionMessage::SendFilesRequest(send_req) => {
                     let confirm_msg = if send_req.num_folders > 0 {
-                        format!(
-                            "Receiving {} files and {} folders?",
-                            send_req.num_files, send_req.num_folders
-                        )
+                        format!("Receiving {} files and {} folders?", send_req.num_files, send_req.num_folders)
                     } else {
                         format!("Receiving {} files?", send_req.num_files)
                     };
                     RECV_NUM_FILES.store(send_req.num_files, Ordering::Relaxed);
-                    *RECEIVER_NOTIFICATION.write().unwrap() =
-                        ReceiverNotification::Confirm(ConfirmType::Receive, confirm_msg);
+                    *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Confirm(ConfirmType::Receive, confirm_msg);
                     let _ = sender.send((0, Progress::None)).await;
                 }
                 ReceiverInteractionMessage::FileDuplication(file_duplication) => {
                     let confirm_msg = format!("overwrite '{}'?", file_duplication.path);
-                    *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Confirm(
-                        ConfirmType::FileDuplication(file_duplication.file_id),
-                        confirm_msg,
-                    );
-                    let _ = sender
-                        .send((file_duplication.file_id, Progress::None))
-                        .await;
+                    *RECEIVER_NOTIFICATION.write().unwrap() =
+                        ReceiverNotification::Confirm(ConfirmType::FileDuplication(file_duplication.file_id), confirm_msg);
+                    let _ = sender.send((file_duplication.file_id, Progress::None)).await;
                 }
                 ReceiverInteractionMessage::RecvNewFile(recv_new_file) => {
                     let _ = sender
                         .send((
                             recv_new_file.file_id,
-                            Progress::New(
-                                recv_new_file.file_id,
-                                recv_new_file.filename.clone(),
-                                recv_new_file.size,
-                            ),
+                            Progress::New(recv_new_file.file_id, recv_new_file.filename.clone(), recv_new_file.size),
                         ))
                         .await;
                 }
                 ReceiverInteractionMessage::BreakPoint(break_point) => {
-                    let _ = sender
-                        .send((
-                            break_point.file_id,
-                            Progress::Received(break_point.position as f32),
-                        ))
-                        .await;
+                    let _ = sender.send((break_point.file_id, Progress::Received(break_point.position as f32))).await;
                 }
                 ReceiverInteractionMessage::FileProgress(fp) => {
-                    let _ = sender
-                        .send((fp.file_id, Progress::Received(fp.position as f32)))
-                        .await;
+                    let _ = sender.send((fp.file_id, Progress::Received(fp.position as f32))).await;
                 }
                 ReceiverInteractionMessage::FileProgressFinish(file_id) => {
                     let _ = sender.send((file_id, Progress::Finished)).await;
                 }
                 ReceiverInteractionMessage::OtherClose => {
-                    *RECEIVER_NOTIFICATION.write().unwrap() =
-                        ReceiverNotification::Errored("The sender stopped sending".to_string());
+                    *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Errored("The sender stopped sending".to_string());
                     let _ = sender.send((0, Progress::Finished)).await;
                 }
                 ReceiverInteractionMessage::ReceiveDone => {
                     *RECEIVER_STATE.write().unwrap() = ReceiverState::RecvDone;
-                    *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Confirm(
-                        ConfirmType::OpenSavePath,
-                        "Open the saved directory?".to_string(),
-                    );
+                    *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Confirm(ConfirmType::OpenSavePath, "Open the saved directory?".to_string());
                     let _ = sender.send((0, Progress::Finished)).await;
                 }
             }

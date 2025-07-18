@@ -53,13 +53,27 @@ pub struct FlashCatReceiver {
 }
 
 impl FlashCatReceiver {
-    pub fn new(share_code: String, specify_relay: Option<String>, output: Option<String>, client_type: ClientType, lan: bool) -> Result<Self> {
+    pub fn new(
+        share_code: String,
+        specify_relay: Option<String>,
+        output: Option<String>,
+        client_type: ClientType,
+        lan: bool,
+    ) -> Result<Self> {
         if output.is_some() {
             *OUT_DIR.write().unwrap() = output.unwrap().clone();
         }
         let encryptor = Arc::new(Encryptor::new(share_code)?);
         let (confirm_tx, confirm_rx) = async_channel::bounded(10);
-        Ok(Self { encryptor, specify_relay, confirm_tx, confirm_rx, client_type, lan, shutdown: Shutdown::new() })
+        Ok(Self {
+            encryptor,
+            specify_relay,
+            confirm_tx,
+            confirm_rx,
+            client_type,
+            lan,
+            shutdown: Shutdown::new(),
+        })
     }
 
     pub async fn start(self: Arc<Self>) -> Result<ReceiverStream> {
@@ -103,7 +117,10 @@ impl FlashCatReceiver {
         }))
     }
 
-    pub async fn send_confirm(&self, confirm: ReceiverConfirm) -> Result<()> {
+    pub async fn send_confirm(
+        &self,
+        confirm: ReceiverConfirm,
+    ) -> Result<()> {
         self.confirm_tx.send(confirm).await?;
         Ok(())
     }
@@ -112,7 +129,11 @@ impl FlashCatReceiver {
         let match_content = self.encryptor.encrypt_share_code_bytes().to_vec();
         let shutdown = Shutdown::new();
         let net_scout = NetScout::new(match_content, Duration::from_secs(3), shutdown.clone());
-        if let Ok(addr) = net_scout.discovery().await { addr } else { None }
+        if let Ok(addr) = net_scout.discovery().await {
+            addr
+        } else {
+            None
+        }
     }
 
     async fn connect_relay(
@@ -126,7 +147,10 @@ impl FlashCatReceiver {
 
         let resp = match client
             .join(JoinRequest {
-                id: Some(Id { encrypted_share_code: self.encryptor.encrypt_share_code_bytes(), character: Character::Receiver.into() }),
+                id: Some(Id {
+                    encrypted_share_code: self.encryptor.encrypt_share_code_bytes(),
+                    character: Character::Receiver.into(),
+                }),
                 client_type: self.client_type.into(),
                 sender_local_relay: None,
             })
@@ -134,16 +158,22 @@ impl FlashCatReceiver {
         {
             Ok(resp) => resp,
             Err(status) => {
-                let _ = Self::send_msg_to_stream(&receiver_stream_tx, ReceiverInteractionMessage::Error(status.message().to_string())).await;
+                let _ = Self::send_msg_to_stream(
+                    &receiver_stream_tx,
+                    ReceiverInteractionMessage::Error(status.message().to_string()),
+                )
+                .await;
                 return Ok(());
             }
         };
 
         let (relay, sender_local_relay, client_latest_version) = if let Some(join_response_message) = resp.into_inner().join_response_message {
             match join_response_message {
-                join_response::JoinResponseMessage::Success(join_success) => {
-                    (join_success.relay, join_success.sender_local_relay, join_success.client_latest_version)
-                }
+                join_response::JoinResponseMessage::Success(join_success) => (
+                    join_success.relay,
+                    join_success.sender_local_relay,
+                    join_success.client_latest_version,
+                ),
                 join_response::JoinResponseMessage::Failed(join_failed) => {
                     return Err(anyhow::Error::msg(join_failed.error_msg));
                 }
@@ -156,14 +186,20 @@ impl FlashCatReceiver {
             ClientType::Cli => {
                 if compare_versions(client_latest_version.as_str(), built_info::PKG_VERSION) == std::cmp::Ordering::Greater {
                     let _ = receiver_stream_tx
-                        .send(ReceiverInteractionMessage::Message(format!("newly cli version[{}] is available", client_latest_version)))
+                        .send(ReceiverInteractionMessage::Message(format!(
+                            "newly cli version[{}] is available",
+                            client_latest_version
+                        )))
                         .await;
                 }
             }
             ClientType::App => {
                 if compare_versions(client_latest_version.as_str(), built_info::PKG_VERSION) == std::cmp::Ordering::Greater {
                     let _ = receiver_stream_tx
-                        .send(ReceiverInteractionMessage::Message(format!("newly app version[{}] is available", client_latest_version)))
+                        .send(ReceiverInteractionMessage::Message(format!(
+                            "newly app version[{}] is available",
+                            client_latest_version
+                        )))
                         .await;
                 }
             }
@@ -172,10 +208,17 @@ impl FlashCatReceiver {
         let endpoint = if relay_type == RelayType::Public && self.lan {
             let sender_local_relay_endpoint = if sender_local_relay.is_some() {
                 let sender_local_relay = sender_local_relay.unwrap();
-                let sender_local_relay_endpoint = get_endpoint(format!("http://{}:{}", sender_local_relay.relay_ip, sender_local_relay.relay_port))?;
+                let sender_local_relay_endpoint = get_endpoint(format!(
+                    "http://{}:{}",
+                    sender_local_relay.relay_ip, sender_local_relay.relay_port
+                ))?;
 
                 match tokio::time::timeout(Duration::from_secs(1), async move {
-                    if RelayServiceClient::connect(sender_local_relay_endpoint.clone()).await.is_ok() { Some(sender_local_relay_endpoint) } else { None }
+                    if RelayServiceClient::connect(sender_local_relay_endpoint.clone()).await.is_ok() {
+                        Some(sender_local_relay_endpoint)
+                    } else {
+                        None
+                    }
                 })
                 .await
                 {
@@ -222,8 +265,14 @@ impl FlashCatReceiver {
 
         let (tx, rx) = mpsc::channel(1024);
 
-        let join = RelayMessage::Join(Id { encrypted_share_code: encryptor.encrypt_share_code_bytes(), character: Character::Receiver.into() });
-        tx.send(RelayUpdate { relay_message: Some(join) }).await?;
+        let join = RelayMessage::Join(Id {
+            encrypted_share_code: encryptor.encrypt_share_code_bytes(),
+            character: Character::Receiver.into(),
+        });
+        tx.send(RelayUpdate {
+            relay_message: Some(join),
+        })
+        .await?;
 
         let mut recv_files = HashMap::new();
 
@@ -460,19 +509,30 @@ impl FlashCatReceiver {
                                 recv_file.write(&data).await?;
                                 Self::send_msg_to_stream(
                                     receiver_stream_tx,
-                                    ReceiverInteractionMessage::FileProgress(Progress { file_id: file_data.file_id, position: recv_file.get_progress() }),
+                                    ReceiverInteractionMessage::FileProgress(Progress {
+                                        file_id: file_data.file_id,
+                                        position: recv_file.get_progress(),
+                                    }),
                                 )
                                 .await?;
                             }
                             SenderMessage::FileDone(file_done) => {
                                 recv_files.remove(&file_done.file_id); // drop file recycle file descriptors
-                                Self::send_msg_to_stream(receiver_stream_tx, ReceiverInteractionMessage::FileProgressFinish(file_done.file_id)).await?;
+                                Self::send_msg_to_stream(
+                                    receiver_stream_tx,
+                                    ReceiverInteractionMessage::FileProgressFinish(file_done.file_id),
+                                )
+                                .await?;
                             }
                         }
                     }
                 }
                 RelayMessage::Receiver(_) => {
-                    Self::send_msg_to_stream(receiver_stream_tx, ReceiverInteractionMessage::Message("Invalid receiver message".to_string())).await?;
+                    Self::send_msg_to_stream(
+                        receiver_stream_tx,
+                        ReceiverInteractionMessage::Message("Invalid receiver message".to_string()),
+                    )
+                    .await?;
                 }
                 RelayMessage::Done(_) => {
                     Self::send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
@@ -499,14 +559,22 @@ impl FlashCatReceiver {
     }
 
     /// Send message to relay.
-    async fn send_msg_to_relay(tx: &mpsc::Sender<RelayUpdate>, msg: RelayMessage) -> Result<()> {
-        let relay_update = RelayUpdate { relay_message: Some(msg) };
+    async fn send_msg_to_relay(
+        tx: &mpsc::Sender<RelayUpdate>,
+        msg: RelayMessage,
+    ) -> Result<()> {
+        let relay_update = RelayUpdate {
+            relay_message: Some(msg),
+        };
         tx.send(relay_update).await?;
         Ok(())
     }
 
     /// Send message to receiver. cli | app
-    async fn send_msg_to_stream(tx: &mpsc::Sender<ReceiverInteractionMessage>, msg: ReceiverInteractionMessage) -> Result<()> {
+    async fn send_msg_to_stream(
+        tx: &mpsc::Sender<ReceiverInteractionMessage>,
+        msg: ReceiverInteractionMessage,
+    ) -> Result<()> {
         tx.send(msg).await?;
         Ok(())
     }
@@ -519,10 +587,16 @@ struct RecvFile {
 
 impl RecvFile {
     fn new(file: fs::File) -> Self {
-        Self { file, progress: 0 }
+        Self {
+            file,
+            progress: 0,
+        }
     }
 
-    async fn write(&mut self, data: &[u8]) -> Result<()> {
+    async fn write(
+        &mut self,
+        data: &[u8],
+    ) -> Result<()> {
         self.file.write(data).await?;
         let data_len = data.len() as u64;
         self.progress += data_len;

@@ -8,8 +8,14 @@ pub struct IndexedMessage<I, M> {
 }
 
 impl<I, M> IndexedMessage<I, M> {
-    pub fn new(index: I, message: M) -> Self {
-        Self { index, message }
+    pub fn new(
+        index: I,
+        message: M,
+    ) -> Self {
+        Self {
+            index,
+            message,
+        }
     }
 
     pub fn index(&self) -> I

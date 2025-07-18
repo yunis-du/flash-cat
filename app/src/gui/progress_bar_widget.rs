@@ -30,7 +30,12 @@ pub struct ProgressBar {
 }
 
 impl ProgressBar {
-    pub fn new(file_id: u64, file_name: String, file_size: u64, num_files: u64) -> Self {
+    pub fn new(
+        file_id: u64,
+        file_name: String,
+        file_size: u64,
+        num_files: u64,
+    ) -> Self {
         let pb = indicatif::ProgressBar::new(file_size);
         Self {
             file_id,
@@ -49,14 +54,19 @@ impl ProgressBar {
 
     pub fn start(&mut self) {
         match &self.state {
-            State::Idle { .. } => {
+            State::Idle {
+                ..
+            } => {
                 self.state = State::Progress(0.0);
             }
             _ => {}
         }
     }
 
-    pub fn update_state(&mut self, new_state: Option<State>) {
+    pub fn update_state(
+        &mut self,
+        new_state: Option<State>,
+    ) {
         if new_state.is_some() {
             let new_state = new_state.unwrap();
             match new_state {
@@ -84,22 +94,16 @@ impl ProgressBar {
         };
 
         if self.state.eq(&State::Skip) {
-            row![
-                text(self.file_name.as_str()).style(styles::text_styles::accent_color_theme),
-                horizontal_space(),
-                text("Skip")
-            ]
-            .spacing(3)
-            .align_y(iced::Alignment::Center)
-            .into()
+            row![text(self.file_name.as_str()).style(styles::text_styles::accent_color_theme), horizontal_space(), text("Skip")]
+                .spacing(3)
+                .align_y(iced::Alignment::Center)
+                .into()
         } else {
             self.pb.set_position(current_progress as u64);
             column![
                 text(self.file_name.as_str()).style(styles::text_styles::accent_color_theme),
                 row![
-                    progress_bar(0.0..=self.file_size as f32, current_progress)
-                        .height(12)
-                        .width(200),
+                    progress_bar(0.0..=self.file_size as f32, current_progress).height(12).width(200),
                     horizontal_space(),
                     text(format!(
                         "{}/{} ({}/s, {}) {}/{}",

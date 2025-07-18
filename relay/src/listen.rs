@@ -19,11 +19,7 @@ pub(crate) async fn start_server(
         .http2_keepalive_interval(Some(DEFAULT_HTTP2_KEEPALIVE_INTERVAL))
         .http2_keepalive_timeout(Some(DEFAULT_HTTP2_KEEPALIVE_TIMEOUT))
         .add_service(RelayServiceServer::new(GrpcServer::new(state)))
-        .add_service(
-            tonic_reflection::server::Builder::configure()
-                .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
-                .build_v1()?,
-        )
+        .add_service(tonic_reflection::server::Builder::configure().register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET).build_v1()?)
         .serve_with_shutdown(addr, signal)
         .await?;
     Ok(())

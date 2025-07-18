@@ -89,11 +89,7 @@ struct RelayCmd {
     external_ip: Option<IpAddr>,
 
     /// Log file path of the relay server.
-    #[clap(
-        long,
-        default_value = "flash-cat-relay.log",
-        env = "FLASH_CAT_RELAY_LOG_PATH"
-    )]
+    #[clap(long, default_value = "flash-cat-relay.log", env = "FLASH_CAT_RELAY_LOG_PATH")]
     log_file: String,
 
     /// Log file path of the relay server.
@@ -205,7 +201,10 @@ async fn recv(recv_cmd: RecvCmd) -> Result<()> {
 }
 
 #[tokio::main]
-async fn start_relay(addr: SocketAddr, external_ip: Option<IpAddr>) -> Result<()> {
+async fn start_relay(
+    addr: SocketAddr,
+    external_ip: Option<IpAddr>,
+) -> Result<()> {
     #[cfg(unix)]
     let mut sigterm = signal(SignalKind::terminate())?;
     #[cfg(unix)]

@@ -13,10 +13,7 @@ use iced::{
 };
 use iced::{
     Element, Font, Length, Task, font,
-    widget::{
-        button, checkbox, column, container, horizontal_space, row, scrollable, svg, text,
-        text_input, tooltip,
-    },
+    widget::{button, checkbox, column, container, horizontal_space, row, scrollable, svg, text, text_input, tooltip},
 };
 use receiver::{Error, Progress, RECV_NUM_FILES, recv};
 
@@ -32,11 +29,9 @@ use crate::gui::{
 
 mod receiver;
 
-pub(super) static RECEIVER_STATE: LazyLock<RwLock<ReceiverState>> =
-    LazyLock::new(|| RwLock::new(ReceiverState::Idle));
+pub(super) static RECEIVER_STATE: LazyLock<RwLock<ReceiverState>> = LazyLock::new(|| RwLock::new(ReceiverState::Idle));
 
-pub(super) static RECEIVER_NOTIFICATION: LazyLock<RwLock<ReceiverNotification>> =
-    LazyLock::new(|| RwLock::new(ReceiverNotification::Normal));
+pub(super) static RECEIVER_NOTIFICATION: LazyLock<RwLock<ReceiverNotification>> = LazyLock::new(|| RwLock::new(ReceiverNotification::Normal));
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ReceiverState {
@@ -98,27 +93,24 @@ impl ReceiverTab {
     }
 
     pub fn subscription(&self) -> iced::Subscription<Message> {
-        let mut batch = self
-            .progress_bars
-            .iter()
-            .map(|progress_bar| progress_bar.subscription().map(Message::ProgressBar))
-            .collect::<Vec<_>>();
+        let mut batch = self.progress_bars.iter().map(|progress_bar| progress_bar.subscription().map(Message::ProgressBar)).collect::<Vec<_>>();
 
-        batch.push(
-            if RECEIVER_STATE.read().unwrap().eq(&ReceiverState::Recving) {
-                if self.fcr.is_some() {
-                    recv(self.fcr.clone().unwrap()).map(Message::ReceiveProgressed)
-                } else {
-                    iced::Subscription::none()
-                }
+        batch.push(if RECEIVER_STATE.read().unwrap().eq(&ReceiverState::Recving) {
+            if self.fcr.is_some() {
+                recv(self.fcr.clone().unwrap()).map(Message::ReceiveProgressed)
             } else {
                 iced::Subscription::none()
-            },
-        );
+            }
+        } else {
+            iced::Subscription::none()
+        });
         iced::Subscription::batch(batch)
     }
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(
+        &mut self,
+        message: Message,
+    ) -> Task<Message> {
         match message {
             Message::PageScrolled(view_port) => {
                 self.scrollable_offset = view_port.relative_offset();
@@ -132,46 +124,28 @@ impl ReceiverTab {
             Message::Receive => {
                 let settings = SETTINGS.read().unwrap();
 
-                let relay_addr = settings
-                    .get_current_settings()
-                    .general
-                    .relay_addr
-                    .to_owned();
+                let relay_addr = settings.get_current_settings().general.relay_addr.to_owned();
                 let relay = if relay_addr.contains(PUBLIC_RELAY) {
                     None
                 } else {
                     Some(relay_addr)
                 };
-                let output = Some(
-                    settings
-                        .get_current_settings()
-                        .general
-                        .download_path
-                        .to_owned(),
-                );
-                let fcr = FlashCatReceiver::new(
-                    self.share_code.clone(),
-                    relay,
-                    output,
-                    ClientType::App,
-                    self.lan,
-                );
+                let output = Some(settings.get_current_settings().general.download_path.to_owned());
+                let fcr = FlashCatReceiver::new(self.share_code.clone(), relay, output, ClientType::App, self.lan);
                 match fcr {
                     Ok(fcr) => {
                         self.fcr.replace(Arc::new(fcr));
                         *RECEIVER_STATE.write().unwrap() = ReceiverState::Recving;
                     }
                     Err(e) => {
-                        *RECEIVER_NOTIFICATION.write().unwrap() =
-                            ReceiverNotification::Errored(e.to_string());
+                        *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Errored(e.to_string());
                     }
                 }
             }
             Message::ProgressBar(_) => {}
             Message::ReceiveProgressed(progress) => match progress {
                 Ok((file_id, progress)) => {
-                    if let receiver::Progress::New(file_id, file_name, file_size) = progress.clone()
-                    {
+                    if let receiver::Progress::New(file_id, file_name, file_size) = progress.clone() {
                         self.progress_bars.push(ProgressBar::new(
                             file_id,
                             file_name.to_owned(),
@@ -180,17 +154,12 @@ impl ReceiverTab {
                         ))
                     } else {
                         let new_state = match progress {
-                            receiver::Progress::Received(recv) => {
-                                Some(ProgressBarState::Progress(recv))
-                            }
+                            receiver::Progress::Received(recv) => Some(ProgressBarState::Progress(recv)),
                             receiver::Progress::Finished => Some(ProgressBarState::Finished),
                             receiver::Progress::Skip => Some(ProgressBarState::Skip),
                             _ => None,
                         };
-                        let progress_bar = self
-                            .progress_bars
-                            .iter_mut()
-                            .find(|progress_bar| progress_bar.get_id().eq(&file_id));
+                        let progress_bar = self.progress_bars.iter_mut().find(|progress_bar| progress_bar.get_id().eq(&file_id));
                         if let Some(progress_bar) = progress_bar {
                             progress_bar.update_state(new_state);
                         }
@@ -198,14 +167,9 @@ impl ReceiverTab {
                 }
                 Err(e) => match e {
                     Error::ShareCodeNotFound => {
-                        *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Errored(
-                            "Not found, Please check share code.".to_string(),
-                        )
+                        *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Errored("Not found, Please check share code.".to_string())
                     }
-                    Error::OtherErroe(err_msg) => {
-                        *RECEIVER_NOTIFICATION.write().unwrap() =
-                            ReceiverNotification::Errored(err_msg)
-                    }
+                    Error::OtherErroe(err_msg) => *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Errored(err_msg),
                 },
             },
             Message::Confirm(confirm_type, confirm) => {
@@ -214,56 +178,37 @@ impl ReceiverTab {
                     match confirm_type {
                         ConfirmType::Receive => {
                             return Task::perform(
-                                async move {
-                                    fcr.send_confirm(ReceiverConfirm::ReceiveConfirm(confirm))
-                                        .await
-                                },
+                                async move { fcr.send_confirm(ReceiverConfirm::ReceiveConfirm(confirm)).await },
                                 |result| {
                                     if let Err(_) = result {
                                         // todo handle error
                                     }
-                                    *RECEIVER_NOTIFICATION.write().unwrap() =
-                                        ReceiverNotification::Normal;
+                                    *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Normal;
                                     Message::ConfirmResult
                                 },
                             );
                         }
                         ConfirmType::FileDuplication(file_id) => {
                             if !confirm {
-                                let progress_bar = self
-                                    .progress_bars
-                                    .iter_mut()
-                                    .find(|progress_bar| progress_bar.get_id().eq(&file_id));
+                                let progress_bar = self.progress_bars.iter_mut().find(|progress_bar| progress_bar.get_id().eq(&file_id));
                                 if let Some(progress_bar) = progress_bar {
                                     progress_bar.update_state(Some(ProgressBarState::Skip));
                                 }
                             }
                             return Task::perform(
-                                async move {
-                                    fcr.send_confirm(ReceiverConfirm::FileConfirm((
-                                        confirm, file_id,
-                                    )))
-                                    .await
-                                },
+                                async move { fcr.send_confirm(ReceiverConfirm::FileConfirm((confirm, file_id))).await },
                                 |result| {
                                     if let Err(_) = result {
                                         // todo handle error
                                     }
-                                    *RECEIVER_NOTIFICATION.write().unwrap() =
-                                        ReceiverNotification::Normal;
+                                    *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Normal;
                                     Message::ConfirmResult
                                 },
                             );
                         }
                         ConfirmType::OpenSavePath => {
                             if confirm {
-                                let current_download_path = SETTINGS
-                                    .read()
-                                    .unwrap()
-                                    .get_current_settings()
-                                    .general
-                                    .to_owned()
-                                    .download_path;
+                                let current_download_path = SETTINGS.read().unwrap().get_current_settings().general.to_owned().download_path;
                                 let _ = open::that(Path::new(current_download_path.as_str()));
                             }
                         }
@@ -282,37 +227,17 @@ impl ReceiverTab {
     }
 
     pub fn view(&self) -> Element<Message> {
-        let share_code_input = row![
-            text("Share Code"),
-            horizontal_space(),
-            text_input("", &self.share_code)
-                .on_input(Message::ShareCodeChanged)
-                .padding(5),
-        ]
-        .spacing(5)
-        .padding(5)
-        .align_y(iced::Alignment::Center);
+        let share_code_input = row![text("Share Code"), horizontal_space(), text_input("", &self.share_code).on_input(Message::ShareCodeChanged).padding(5),]
+            .spacing(5)
+            .padding(5)
+            .align_y(iced::Alignment::Center);
 
-        let help_icon = svg(svg::Handle::from_memory(HELP_ICON))
-            .style(styles::svg_styles::colored_svg_theme)
-            .height(20)
-            .width(20);
+        let help_icon = svg(svg::Handle::from_memory(HELP_ICON)).style(styles::svg_styles::colored_svg_theme).height(20).width(20);
 
-        let help_tooltip = tooltip(
-            help_icon,
-            "Sender is in the same local area network",
-            Position::FollowCursor,
-        )
-        .gap(10)
-        .style(container::rounded_box);
+        let help_tooltip = tooltip(help_icon, "Sender is in the same local area network", Position::FollowCursor).gap(10).style(container::rounded_box);
 
-        let lan_checkbox = row![
-            checkbox("LAN", self.lan).on_toggle(|lan| Message::LanChanged(lan)),
-            help_tooltip,
-        ]
-        .spacing(5)
-        .padding(5)
-        .align_y(iced::Alignment::Center);
+        let lan_checkbox =
+            row![checkbox("LAN", self.lan).on_toggle(|lan| Message::LanChanged(lan)), help_tooltip,].spacing(5).padding(5).align_y(iced::Alignment::Center);
 
         let receiver_state_read = RECEIVER_STATE.read().unwrap();
 
@@ -352,9 +277,7 @@ impl ReceiverTab {
                 row![text(err).style(styles::text_styles::red_text_theme)]
             }
             ReceiverNotification::Confirm(confirm_type, confirm_msg) => row![
-                text(confirm_msg)
-                    .style(styles::text_styles::accent_color_theme)
-                    .width(Length::Fixed(350.0)),
+                text(confirm_msg).style(styles::text_styles::accent_color_theme).width(Length::Fixed(350.0)),
                 horizontal_space(),
                 button("Yes").on_press(Message::Confirm(confirm_type.clone(), true)),
                 button("No").on_press(Message::Confirm(confirm_type.clone(), false)),
@@ -363,16 +286,7 @@ impl ReceiverTab {
             .align_y(Alignment::Center),
         };
 
-        column![
-            share_code_input,
-            lan_checkbox,
-            self.progress_view(),
-            recv_button,
-            notification,
-        ]
-        .padding(5)
-        .spacing(5)
-        .into()
+        column![share_code_input, lan_checkbox, self.progress_view(), recv_button, notification,].padding(5).spacing(5).into()
     }
 
     fn progress_view(&self) -> Element<'_, Message> {
@@ -380,17 +294,10 @@ impl ReceiverTab {
             column!(
                 container(
                     scrollable(
-                        Column::from_vec(
-                            self.progress_bars
-                                .iter()
-                                .map(|progress_bar| {
-                                    progress_bar.view().map(Message::ProgressBar)
-                                })
-                                .collect(),
-                        )
-                        .padding(10)
-                        .spacing(5)
-                        .width(Length::Fill)
+                        Column::from_vec(self.progress_bars.iter().map(|progress_bar| { progress_bar.view().map(Message::ProgressBar) }).collect(),)
+                            .padding(10)
+                            .spacing(5)
+                            .width(Length::Fill)
                     )
                     .id(self.scrollable_id.clone())
                     .on_scroll(Message::PageScrolled)
@@ -407,13 +314,11 @@ impl ReceiverTab {
         } else {
             column!(
                 container(
-                    text(
-                        if RECEIVER_STATE.read().unwrap().eq(&ReceiverState::Recving) {
-                            "Recving..."
-                        } else {
-                            "Enter share code to receive"
-                        }
-                    )
+                    text(if RECEIVER_STATE.read().unwrap().eq(&ReceiverState::Recving) {
+                        "Recving..."
+                    } else {
+                        "Enter share code to receive"
+                    })
                     .font(Font {
                         weight: font::Weight::Bold,
                         ..Default::default()

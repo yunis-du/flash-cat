@@ -74,7 +74,10 @@ impl Session {
         *self.last_accessed.lock()
     }
 
-    pub async fn send_to_share(&self, msg: RelayMessage) -> Result<()> {
+    pub async fn send_to_share(
+        &self,
+        msg: RelayMessage,
+    ) -> Result<()> {
         self.user_pair.sharer_update_tx.send(msg).await?;
         Ok(())
     }
@@ -83,7 +86,10 @@ impl Session {
         Ok(self.user_pair.sharer_update_rx.recv().await?)
     }
 
-    pub async fn send_to_recipient(&self, msg: RelayMessage) -> Result<()> {
+    pub async fn send_to_recipient(
+        &self,
+        msg: RelayMessage,
+    ) -> Result<()> {
         self.user_pair.recipient_update_tx.send(msg).await?;
         Ok(())
     }
@@ -92,7 +98,10 @@ impl Session {
         Ok(self.user_pair.recipient_update_rx.recv().await?)
     }
 
-    pub async fn broadcast(&self, msg: RelayMessage) -> Result<()> {
+    pub async fn broadcast(
+        &self,
+        msg: RelayMessage,
+    ) -> Result<()> {
         self.user_pair.sharer_update_tx.send(msg.clone()).await?;
         self.user_pair.recipient_update_tx.send(msg).await?;
         Ok(())

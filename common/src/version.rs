@@ -8,7 +8,10 @@ pub struct VersionInfo {
 }
 
 impl fmt::Display for VersionInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
         write!(
             f,
             "    Name:        {}
@@ -24,7 +27,10 @@ impl fmt::Display for VersionInfo {
 }
 
 /// Compare two versions.
-pub fn compare_versions(ver1: &str, ver2: &str) -> std::cmp::Ordering {
+pub fn compare_versions(
+    ver1: &str,
+    ver2: &str,
+) -> std::cmp::Ordering {
     let v1: Vec<u32> = ver1.split('.').map(|s| s.parse().unwrap_or(0)).collect();
     let v2: Vec<u32> = ver2.split('.').map(|s| s.parse().unwrap_or(0)).collect();
 

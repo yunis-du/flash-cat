@@ -34,7 +34,10 @@ impl RelayState {
         self.external_ip
     }
 
-    pub fn lookup(&self, name: &str) -> Option<Arc<Session>> {
+    pub fn lookup(
+        &self,
+        name: &str,
+    ) -> Option<Arc<Session>> {
         self.store.get(name).map(|s| s.clone())
     }
 
@@ -58,7 +61,10 @@ impl RelayState {
         }
     }
 
-    pub fn remove(&self, name: &str) -> bool {
+    pub fn remove(
+        &self,
+        name: &str,
+    ) -> bool {
         if let Some((_, session)) = self.store.remove(name) {
             session.shutdown();
             true
@@ -66,12 +72,19 @@ impl RelayState {
             false
         }
     }
-    pub async fn close_session(&self, name: &str) -> Result<()> {
+    pub async fn close_session(
+        &self,
+        name: &str,
+    ) -> Result<()> {
         self.remove(name);
         Ok(())
     }
 
-    pub fn insert(&self, name: &str, session: Arc<Session>) {
+    pub fn insert(
+        &self,
+        name: &str,
+        session: Arc<Session>,
+    ) {
         if let Some(prev_session) = self.store.insert(name.to_string(), session) {
             prev_session.shutdown();
         }
@@ -97,7 +110,10 @@ impl Relay {
         })
     }
 
-    pub fn new_with_shutdown(external_ip: Option<IpAddr>, shutdown: Shutdown) -> Result<Self> {
+    pub fn new_with_shutdown(
+        external_ip: Option<IpAddr>,
+        shutdown: Shutdown,
+    ) -> Result<Self> {
         Ok(Self {
             state: Arc::new(RelayState::new(external_ip)?),
             shutdown,
@@ -109,7 +125,10 @@ impl Relay {
     }
 
     /// Run the application server, listening on a stream of connections.
-    pub async fn listen(&self, addr: SocketAddr) -> Result<()> {
+    pub async fn listen(
+        &self,
+        addr: SocketAddr,
+    ) -> Result<()> {
         let state = self.state.clone();
         let shutdown_signal = self.shutdown.clone();
         tokio::spawn(async move {
@@ -122,7 +141,10 @@ impl Relay {
     }
 
     /// Convenience function to call [`Server::listen`] bound to a TCP address.
-    pub async fn bind(&self, addr: SocketAddr) -> Result<()> {
+    pub async fn bind(
+        &self,
+        addr: SocketAddr,
+    ) -> Result<()> {
         self.listen(addr).await
     }
 

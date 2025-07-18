@@ -46,15 +46,13 @@ impl SettingsTab {
         )
     }
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(
+        &mut self,
+        message: Message,
+    ) -> Task<Message> {
         match message {
-            Message::Appearance(message) => self
-                .appearance_settings
-                .update(message)
-                .map(Message::Appearance),
-            Message::General(message) => {
-                self.general_settings.update(message).map(Message::General)
-            }
+            Message::Appearance(message) => self.appearance_settings.update(message).map(Message::Appearance),
+            Message::General(message) => self.general_settings.update(message).map(Message::General),
             Message::About(message) => self.about.update(message).map(Message::About),
             Message::PageScrolled(view_port) => {
                 self.scrollable_offset = view_port.relative_offset();
@@ -78,10 +76,7 @@ impl SettingsTab {
         .on_scroll(Message::PageScrolled)
         .direction(styles::scrollable_styles::vertical_direction());
 
-        column![settings_body.height(Length::FillPortion(10))]
-            .align_x(Alignment::Center)
-            .spacing(5)
-            .into()
+        column![settings_body.height(Length::FillPortion(10))].align_x(Alignment::Center).spacing(5).into()
     }
 }
 
@@ -118,7 +113,10 @@ pub mod settings_config {
     pub const ALL_THEMES: [Theme; 2] = [Theme::Light, Theme::Dark];
 
     impl std::fmt::Display for Theme {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn fmt(
+            &self,
+            f: &mut std::fmt::Formatter<'_>,
+        ) -> std::fmt::Result {
             let str = match self {
                 Theme::Light => "Light",
                 Theme::Dark => "Dark",
@@ -136,12 +134,7 @@ pub mod settings_config {
 
     impl Default for Config {
         fn default() -> Self {
-            let download_path = directories::UserDirs::new()
-                .unwrap()
-                .download_dir()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
+            let download_path = directories::UserDirs::new().unwrap().download_dir().unwrap().to_string_lossy().to_string();
             Self {
                 general: GeneralSettings {
                     download_path,
@@ -163,8 +156,7 @@ pub mod settings_config {
         pub relay_addr: String,
     }
 
-    pub static SETTINGS: LazyLock<Arc<RwLock<Settings>>> =
-        LazyLock::new(|| Arc::new(RwLock::new(Settings::new())));
+    pub static SETTINGS: LazyLock<Arc<RwLock<Settings>>> = LazyLock::new(|| Arc::new(RwLock::new(Settings::new())));
 
     pub struct Settings {
         current_config: Config,

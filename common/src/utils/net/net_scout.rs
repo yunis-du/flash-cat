@@ -25,7 +25,11 @@ pub struct NetScout {
 }
 
 impl NetScout {
-    pub fn new(match_content: Vec<u8>, timeout: Duration, shutdown: Shutdown) -> Self {
+    pub fn new(
+        match_content: Vec<u8>,
+        timeout: Duration,
+        shutdown: Shutdown,
+    ) -> Self {
         Self {
             match_content,
             timeout,
@@ -33,11 +37,13 @@ impl NetScout {
         }
     }
 
-    pub async fn broadcast(&mut self, port: u16) -> Result<()> {
+    pub async fn broadcast(
+        &mut self,
+        port: u16,
+    ) -> Result<()> {
         let socket = UdpSocket::bind("0.0.0.0:0").await?;
         socket.set_broadcast(true)?;
-        let broadcast_addr: SocketAddr =
-            format!("{}:{}", BROADCAST_ADDR, BROADCAST_PORT).parse()?;
+        let broadcast_addr: SocketAddr = format!("{}:{}", BROADCAST_ADDR, BROADCAST_PORT).parse()?;
 
         let mut broadcast_interval = time::interval(BROADCAST_INTERVAL);
         broadcast_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -131,8 +137,7 @@ mod test {
     #[tokio::test]
     async fn broadcast() {
         let content = b"broadcast_test0123456789abcdefg123";
-        let mut broadcast =
-            NetScout::new(content.to_vec(), Duration::from_secs(60), Shutdown::new());
+        let mut broadcast = NetScout::new(content.to_vec(), Duration::from_secs(60), Shutdown::new());
         if let Err(err) = broadcast.broadcast(2018).await {
             println!("broadcast failed, {err}");
         }

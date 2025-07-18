@@ -7,11 +7,9 @@ use flash_cat_common::{
     consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY, SEND_BUFF_SIZE},
     crypt::encryptor::Encryptor,
     proto::{
-        Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, FileData, FileDone, Id,
-        JoinRequest, NewFileRequest, RelayInfo, RelayUpdate, SendRequest, SenderUpdate,
-        file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage,
-        relay_service_client::RelayServiceClient, relay_update::RelayMessage,
-        sender_update::SenderMessage, BreakPoint,
+        BreakPoint, Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, FileData, FileDone, Id, JoinRequest, NewFileRequest, RelayInfo,
+        RelayUpdate, SendRequest, SenderUpdate, file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage,
+        relay_service_client::RelayServiceClient, relay_update::RelayMessage, sender_update::SenderMessage,
     },
     utils::{
         fs::{FileCollector, collect_files, is_idr, paths_exist, remove_files, zip_folder},
@@ -155,8 +153,7 @@ impl FlashCatSender {
             .await?;
 
             // broadcast
-            self.broadcast_relay_addr(local_relay_port, sender_stream_tx.clone())
-                .await;
+            self.broadcast_relay_addr(local_relay_port, sender_stream_tx.clone()).await;
         }
         // resolve shutdown when sender_stream_rx is no message will cause panic
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
@@ -218,12 +215,7 @@ impl FlashCatSender {
         tokio::spawn(async move {
             let mut net_scout = NetScout::new(match_content, BROADCAST_TIMEOUT, shutdown.clone());
             if let Err(e) = net_scout.broadcast(local_relay_port).await {
-                let _ = &sender_stream_tx
-                    .send(SenderInteractionMessage::Error(format!(
-                        "broadcast error {}",
-                        e.to_string()
-                    )))
-                    .await;
+                let _ = &sender_stream_tx.send(SenderInteractionMessage::Error(format!("broadcast error {}", e.to_string()))).await;
             }
         });
     }
@@ -265,35 +257,27 @@ impl FlashCatSender {
             Err(status) => {
                 let _ = Self::send_msg_to_stream(
                     &sender_stream_tx,
-                    SenderInteractionMessage::RelayFailed((
-                        relay_type,
-                        status.message().to_string(),
-                    )),
+                    SenderInteractionMessage::RelayFailed((relay_type, status.message().to_string())),
                 )
                 .await;
                 return Ok(());
             }
         };
 
-        let (relay, client_latest_version) =
-            if let Some(join_response_message) = resp.into_inner().join_response_message {
-                match join_response_message {
-                    join_response::JoinResponseMessage::Success(join_success) => {
-                        (join_success.relay, join_success.client_latest_version)
-                    }
-                    join_response::JoinResponseMessage::Failed(join_failed) => {
-                        return Err(anyhow::Error::msg(join_failed.error_msg));
-                    }
+        let (relay, client_latest_version) = if let Some(join_response_message) = resp.into_inner().join_response_message {
+            match join_response_message {
+                join_response::JoinResponseMessage::Success(join_success) => (join_success.relay, join_success.client_latest_version),
+                join_response::JoinResponseMessage::Failed(join_failed) => {
+                    return Err(anyhow::Error::msg(join_failed.error_msg));
                 }
-            } else {
-                return Err(anyhow::Error::msg("can't get relay info"));
-            };
+            }
+        } else {
+            return Err(anyhow::Error::msg("can't get relay info"));
+        };
 
         match self.client_type {
             ClientType::Cli => {
-                if compare_versions(client_latest_version.as_str(), built_info::PKG_VERSION)
-                    == std::cmp::Ordering::Greater
-                {
+                if compare_versions(client_latest_version.as_str(), built_info::PKG_VERSION) == std::cmp::Ordering::Greater {
                     let _ = sender_stream_tx
                         .send(SenderInteractionMessage::Message(format!(
                             "newly cli version[{}] is available",
@@ -303,9 +287,7 @@ impl FlashCatSender {
                 }
             }
             ClientType::App => {
-                if compare_versions(client_latest_version.as_str(), built_info::PKG_VERSION)
-                    == std::cmp::Ordering::Greater
-                {
+                if compare_versions(client_latest_version.as_str(), built_info::PKG_VERSION) == std::cmp::Ordering::Greater {
                     let _ = sender_stream_tx
                         .send(SenderInteractionMessage::Message(format!(
                             "newly app version[{}] is available",
@@ -319,10 +301,7 @@ impl FlashCatSender {
         match relay {
             Some(relay_info) => {
                 // Directly connect to Relay, improve performance
-                endpoint = get_endpoint(format!(
-                    "http://{}:{}",
-                    relay_info.relay_ip, relay_info.relay_port
-                ))?;
+                endpoint = get_endpoint(format!("http://{}:{}", relay_info.relay_ip, relay_info.relay_port))?;
             }
             None => (),
         }
@@ -330,15 +309,7 @@ impl FlashCatSender {
         let encryptor = self.encryptor.clone();
         let file_collector = self.file_collector.clone();
         tokio::spawn(async move {
-            if let Err(e) = Self::relay_channel(
-                encryptor,
-                file_collector.clone(),
-                endpoint,
-                &sender_stream_tx,
-                shutdown,
-            )
-            .await
-            {
+            if let Err(e) = Self::relay_channel(encryptor, file_collector.clone(), endpoint, &sender_stream_tx, shutdown).await {
                 let _ = Self::send_msg_to_stream(
                     &sender_stream_tx,
                     SenderInteractionMessage::RelayFailed((relay_type, e.to_string())),
@@ -434,45 +405,24 @@ impl FlashCatSender {
                                             let sender_stream_tx = sender_stream_tx.clone();
                                             let notify_rx = confirm_rx.clone();
                                             tokio::spawn(async move {
-                                                if let Err(err) = Self::send_files(
-                                                    encryptor,
-                                                    tx,
-                                                    file_collector,
-                                                    notify_rx,
-                                                    &sender_stream_tx,
-                                                )
-                                                .await
-                                                {
+                                                if let Err(err) = Self::send_files(encryptor, tx, file_collector, notify_rx, &sender_stream_tx).await {
                                                     let _ = Self::send_msg_to_stream(
                                                         &sender_stream_tx,
-                                                        SenderInteractionMessage::Error(format!(
-                                                            "send files error {}",
-                                                            err.to_string()
-                                                        )),
+                                                        SenderInteractionMessage::Error(format!("send files error {}", err.to_string())),
                                                     )
                                                     .await;
                                                 }
                                             });
                                         }
                                         Confirm::Reject => {
-                                            Self::send_msg_to_relay(
-                                                &tx,
-                                                RelayMessage::Done(Done {}),
-                                            )
-                                            .await?;
-                                            Self::send_msg_to_stream(
-                                                sender_stream_tx,
-                                                SenderInteractionMessage::ReceiverReject,
-                                            )
-                                            .await?;
+                                            Self::send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
+                                            Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::ReceiverReject).await?;
                                         }
                                     }
                                 } else {
                                     Self::send_msg_to_stream(
                                         sender_stream_tx,
-                                        SenderInteractionMessage::Error(
-                                            "try_from confirm failed".to_string(),
-                                        ),
+                                        SenderInteractionMessage::Error("try_from confirm failed".to_string()),
                                     )
                                     .await?;
                                 }
@@ -484,8 +434,7 @@ impl FlashCatSender {
                     }
                 }
                 RelayMessage::Done(_) => {
-                    Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::Completed)
-                        .await?;
+                    Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::Completed).await?;
                 }
                 RelayMessage::Error(e) => {
                     Self::send_msg_to_stream(
@@ -495,11 +444,7 @@ impl FlashCatSender {
                     .await?;
                 }
                 RelayMessage::Terminated(_) => {
-                    Self::send_msg_to_stream(
-                        sender_stream_tx,
-                        SenderInteractionMessage::OtherClose,
-                    )
-                    .await?;
+                    Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::OtherClose).await?;
                 }
                 RelayMessage::Ping(_) => (),
                 RelayMessage::Pong(_) => (),
@@ -662,19 +607,13 @@ impl FlashCatSender {
         for i in 0..files.len() {
             let p = files[i].as_str();
             if is_idr(p) {
-                let file_name = format!(
-                    "{}.zip",
-                    Path::new(p)
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                );
+                let file_name = format!("{}.zip", Path::new(p).file_name().unwrap_or_default().to_string_lossy());
                 let path = p.to_owned();
                 let file_name_for_task = file_name.clone();
                 let shutdown_clone = shutdown.clone();
-                async_task.push(tokio::spawn(async move {
-                    zip_folder(file_name_for_task, path, shutdown_clone)
-                }));
+                async_task.push(tokio::spawn(
+                    async move { zip_folder(file_name_for_task, path, shutdown_clone) },
+                ));
                 zip_files.push(file_name.clone());
                 files[i] = file_name;
             }
@@ -694,7 +633,10 @@ impl FlashCatSender {
         Ok((files, zip_files))
     }
 
-    async fn send_msg_to_relay(tx: &mpsc::Sender<RelayUpdate>, msg: RelayMessage) -> Result<()> {
+    async fn send_msg_to_relay(
+        tx: &mpsc::Sender<RelayUpdate>,
+        msg: RelayMessage,
+    ) -> Result<()> {
         let relay_update = RelayUpdate {
             relay_message: Some(msg),
         };

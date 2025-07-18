@@ -1,8 +1,7 @@
 pub mod icons {
     pub static CARD_CHECKLIST: &[u8] = include_bytes!("../../assets/icons/flash-cat.svg");
     pub static GITHUB_ICON: &[u8] = include_bytes!("../../assets/icons/github.svg");
-    pub static GEAR_WIDE_CONNECTED: &[u8] =
-        include_bytes!("../../assets/icons/gear-wide-connected.svg");
+    pub static GEAR_WIDE_CONNECTED: &[u8] = include_bytes!("../../assets/icons/gear-wide-connected.svg");
     pub static SENDER_ICON: &[u8] = include_bytes!("../../assets/icons/sender.svg");
     pub static SEND_BUTTON_ICON: &[u8] = include_bytes!("../../assets/icons/send_button.svg");
     pub static RECEIVER_ICON: &[u8] = include_bytes!("../../assets/icons/receiver.svg");
@@ -20,9 +19,7 @@ pub mod fonts {
     pub static FONTS: &[Cow<'static, [u8]>] = &[
         // Source Han Sans CN
         Cow::Borrowed(include_bytes!("../../assets/fonts/SourceHanSansCN-Bold.otf").as_slice()),
-        Cow::Borrowed(
-            include_bytes!("../../assets/fonts/SourceHanSansCN-ExtraLight.otf").as_slice(),
-        ),
+        Cow::Borrowed(include_bytes!("../../assets/fonts/SourceHanSansCN-ExtraLight.otf").as_slice()),
         Cow::Borrowed(include_bytes!("../../assets/fonts/SourceHanSansCN-Heavy.otf").as_slice()),
         Cow::Borrowed(include_bytes!("../../assets/fonts/SourceHanSansCN-Light.otf").as_slice()),
         Cow::Borrowed(include_bytes!("../../assets/fonts/SourceHanSansCN-Medium.otf").as_slice()),

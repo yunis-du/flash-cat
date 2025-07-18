@@ -3,7 +3,10 @@ use iced::widget::button::{Status, Style};
 use iced::{Background, Border};
 
 /// A custom theme that makes button transparent
-pub fn transparent_button_theme(theme: &Theme, status: Status) -> Style {
+pub fn transparent_button_theme(
+    theme: &Theme,
+    status: Status,
+) -> Style {
     let palette = theme.extended_palette();
     let base = transparent_styled(palette.success.base);
 
@@ -14,7 +17,10 @@ pub fn transparent_button_theme(theme: &Theme, status: Status) -> Style {
 }
 
 /// A custom theme that makes button transparent, with rounded border
-pub fn transparent_button_with_rounded_border_theme(theme: &Theme, status: Status) -> Style {
+pub fn transparent_button_with_rounded_border_theme(
+    theme: &Theme,
+    status: Status,
+) -> Style {
     let palette = theme.extended_palette();
     let base = transparent_with_rounded_border_styled(palette.success.base);
 
@@ -47,9 +53,7 @@ fn transparent_with_rounded_border_styled(pair: palette::Pair) -> Style {
 
 fn disabled(style: Style) -> Style {
     Style {
-        background: style
-            .background
-            .map(|background| background.scale_alpha(0.5)),
+        background: style.background.map(|background| background.scale_alpha(0.5)),
         text_color: style.text_color.scale_alpha(0.5),
         ..style
     }

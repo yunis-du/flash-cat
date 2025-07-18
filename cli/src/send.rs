@@ -24,23 +24,22 @@ pub struct Send {
 }
 
 impl Send {
-    pub async fn new(zip: bool, relay: Option<String>, files: Vec<String>) -> Result<Self> {
+    pub async fn new(
+        zip: bool,
+        relay: Option<String>,
+        files: Vec<String>,
+    ) -> Result<Self> {
         let files = files
             .into_iter()
             .map(|f| {
                 if f == "." || f == "./" {
-                    return env::current_dir()
-                        .unwrap_or(PathBuf::from("."))
-                        .to_str()
-                        .unwrap_or(".")
-                        .to_string();
+                    return env::current_dir().unwrap_or(PathBuf::from(".")).to_str().unwrap_or(".").to_string();
                 }
                 f
             })
             .collect::<Vec<_>>();
         let share_code = gen_share_code();
-        let sender =
-            FlashCatSender::new(share_code.clone(), relay.clone(), files, zip, ClientType::Cli).await?;
+        let sender = FlashCatSender::new(share_code.clone(), relay.clone(), files, zip, ClientType::Cli).await?;
         Ok(Self {
             share_code,
             sender,
@@ -73,11 +72,8 @@ impl Send {
         } else {
             println!("flash-cat recv {}", self.share_code);
         }
-        
-        let mut progress = Progress::new(
-            file_collector.num_files,
-            file_collector.max_file_name_length,
-        );
+
+        let mut progress = Progress::new(file_collector.num_files, file_collector.max_file_name_length);
 
         for file in file_collector.files.iter() {
             progress.add_progress(&file.name, file.file_id, file.size);
@@ -97,11 +93,7 @@ impl Send {
                         self.shutdown();
                     }
                     SenderInteractionMessage::RelayFailed((relay_type, error)) => {
-                        println!(
-                            "connect to {} relay failed: {}",
-                            relay_type.to_string(),
-                            error
-                        );
+                        println!("connect to {} relay failed: {}", relay_type.to_string(), error);
                         if RelayType::Local.eq(&relay_type) || RelayType::Specify.eq(&relay_type) {
                             process::exit(1);
                         }

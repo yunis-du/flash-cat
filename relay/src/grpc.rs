@@ -7,9 +7,8 @@ use tonic::{Request, Response, Status, Streaming};
 
 use flash_cat_common::{
     proto::{
-        Character, CloseRequest, CloseResponse, JoinFailed, JoinRequest, JoinResponse, JoinSuccess,
-        Joined, Ready, RelayInfo, RelayUpdate, Terminated, join_response::JoinResponseMessage,
-        relay_service_server::RelayService, relay_update::RelayMessage,
+        Character, CloseRequest, CloseResponse, JoinFailed, JoinRequest, JoinResponse, JoinSuccess, Joined, Ready, RelayInfo, RelayUpdate, Terminated,
+        join_response::JoinResponseMessage, relay_service_server::RelayService, relay_update::RelayMessage,
     },
     utils::net::get_local_ip,
 };
@@ -35,7 +34,10 @@ type RR<T> = Result<Response<T>, Status>;
 impl RelayService for GrpcServer {
     type ChannelStream = ReceiverStream<Result<RelayUpdate, Status>>;
 
-    async fn join(&self, request: Request<JoinRequest>) -> RR<JoinResponse> {
+    async fn join(
+        &self,
+        request: Request<JoinRequest>,
+    ) -> RR<JoinResponse> {
         let relay_port = match request.local_addr() {
             Some(local_addr) => local_addr.port() as u32,
             None => 0,
@@ -44,8 +46,7 @@ impl RelayService for GrpcServer {
         let request = request.into_inner();
         match request.id {
             Some(id) => {
-                let session_name =
-                    String::from_utf8_lossy(id.encrypted_share_code.as_ref()).to_string();
+                let session_name = String::from_utf8_lossy(id.encrypted_share_code.as_ref()).to_string();
                 let character = match Character::try_from(id.character) {
                     Ok(character) => character,
                     Err(_) => return Err(Status::invalid_argument("unknown character")),
@@ -107,7 +108,10 @@ impl RelayService for GrpcServer {
         }
     }
 
-    async fn channel(&self, request: Request<Streaming<RelayUpdate>>) -> RR<Self::ChannelStream> {
+    async fn channel(
+        &self,
+        request: Request<Streaming<RelayUpdate>>,
+    ) -> RR<Self::ChannelStream> {
         let mut stream = request.into_inner();
         let first_update = match stream.next().await {
             Some(result) => result?,
@@ -118,8 +122,7 @@ impl RelayService for GrpcServer {
 
         let (session, character) = match first_update.relay_message {
             Some(RelayMessage::Join(join)) => {
-                let session_name =
-                    String::from_utf8_lossy(join.encrypted_share_code.as_ref()).to_string();
+                let session_name = String::from_utf8_lossy(join.encrypted_share_code.as_ref()).to_string();
                 let character = match Character::try_from(join.character) {
                     Ok(character) => character,
                     Err(_) => return Err(Status::invalid_argument("unknown character")),
@@ -150,16 +153,15 @@ impl RelayService for GrpcServer {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    async fn close(&self, request: Request<CloseRequest>) -> RR<CloseResponse> {
+    async fn close(
+        &self,
+        request: Request<CloseRequest>,
+    ) -> RR<CloseResponse> {
         let request = request.into_inner();
-        let session_name =
-            String::from_utf8_lossy(request.encrypted_share_code.as_ref()).to_string();
+        let session_name = String::from_utf8_lossy(request.encrypted_share_code.as_ref()).to_string();
         info!("closing session {}", session_name);
         if let Some(session) = self.0.lookup(&session_name) {
-            if let Err(e) = session
-                .broadcast(RelayMessage::Terminated(Terminated {}))
-                .await
-            {
+            if let Err(e) = session.broadcast(RelayMessage::Terminated(Terminated {})).await {
                 error!("broadcast failed: {e}");
             }
         }
@@ -241,7 +243,10 @@ async fn handle_update(
 }
 
 /// Attempt to send a server message to the client.
-async fn send_msg(tx: &RelayTx, message: RelayMessage) -> bool {
+async fn send_msg(
+    tx: &RelayTx,
+    message: RelayMessage,
+) -> bool {
     let update = Ok(RelayUpdate {
         relay_message: Some(message),
     });
@@ -249,6 +254,9 @@ async fn send_msg(tx: &RelayTx, message: RelayMessage) -> bool {
 }
 
 /// Attempt to send an error string to the client.
-async fn send_err(tx: &RelayTx, err: String) -> bool {
+async fn send_err(
+    tx: &RelayTx,
+    err: String,
+) -> bool {
     send_msg(tx, RelayMessage::Error(err)).await
 }

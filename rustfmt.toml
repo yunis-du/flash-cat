@@ -1,0 +1,5 @@
+max_width = 160
+use_small_heuristics = "Off"
+fn_params_layout = "Vertical"
+fn_call_width = 80
+reorder_imports = true

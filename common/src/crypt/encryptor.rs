@@ -23,39 +23,29 @@ pub struct Encryptor {
 impl Encryptor {
     pub fn new(share_code: String) -> Result<Self> {
         if share_code.len() != 12 {
-            return Err(anyhow::Error::msg(
-                "share code length must be 12".to_string(),
-            ));
+            return Err(anyhow::Error::msg("share code length must be 12".to_string()));
         }
         Ok(Self {
             share_code,
-            cipher: CustomAes256Gcm(aes_gcm::Aes256Gcm::new(
-                consts::DEFAULT_SECRET_KEY.as_bytes().into(),
-            )),
+            cipher: CustomAes256Gcm(aes_gcm::Aes256Gcm::new(consts::DEFAULT_SECRET_KEY.as_bytes().into())),
         })
     }
 
-    pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
-        let ciphertext = self
-            .cipher
-            .0
-            .encrypt(
-                GenericArray::from_slice(self.share_code.as_bytes()),
-                plaintext,
-            )
-            .map_err(|op| anyhow::Error::msg(op.to_string()))?;
+    pub fn encrypt(
+        &self,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>> {
+        let ciphertext =
+            self.cipher.0.encrypt(GenericArray::from_slice(self.share_code.as_bytes()), plaintext).map_err(|op| anyhow::Error::msg(op.to_string()))?;
         Ok(ciphertext)
     }
 
-    pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
-        let plaintext = self
-            .cipher
-            .0
-            .decrypt(
-                GenericArray::from_slice(self.share_code.as_bytes()),
-                ciphertext,
-            )
-            .map_err(|op| anyhow::Error::msg(op.to_string()))?;
+    pub fn decrypt(
+        &self,
+        ciphertext: &[u8],
+    ) -> Result<Vec<u8>> {
+        let plaintext =
+            self.cipher.0.decrypt(GenericArray::from_slice(self.share_code.as_bytes()), ciphertext).map_err(|op| anyhow::Error::msg(op.to_string()))?;
         Ok(plaintext)
     }
 
@@ -79,7 +69,10 @@ impl Encryptor {
 }
 
 impl Debug for CustomAes256Gcm {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
         f.debug_tuple("CustomAes256Gcm").finish()
     }
 }
@@ -106,10 +99,7 @@ mod test {
             Ok(decrypted_text) => decrypted_text,
             Err(err) => return Err(anyhow::Error::msg(err.to_string())),
         };
-        println!(
-            "Decrypted Text: {:?}",
-            String::from_utf8_lossy(&decrypted_text)
-        );
+        println!("Decrypted Text: {:?}", String::from_utf8_lossy(&decrypted_text));
         Ok(())
     }
 }

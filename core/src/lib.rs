@@ -102,8 +102,7 @@ pub struct RecvNewFile {
 }
 
 fn get_endpoint(s: impl Into<Bytes>) -> Result<Endpoint> {
-    let endpoint = Endpoint::from_shared(s.into())?
-        .http2_keep_alive_interval(DEFAULT_HTTP2_KEEPALIVE_INTERVAL)
-        .keep_alive_timeout(DEFAULT_HTTP2_KEEPALIVE_TIMEOUT);
+    let endpoint =
+        Endpoint::from_shared(s.into())?.http2_keep_alive_interval(DEFAULT_HTTP2_KEEPALIVE_INTERVAL).keep_alive_timeout(DEFAULT_HTTP2_KEEPALIVE_TIMEOUT);
     Ok(endpoint)
 }

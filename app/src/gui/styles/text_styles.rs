@@ -11,7 +11,9 @@ pub fn accent_color_theme(_theme: &Theme) -> Style {
 
 /// A custom theme that makes text red
 pub fn red_text_theme(_theme: &Theme) -> Style {
-    Style { color: Some(red()) }
+    Style {
+        color: Some(red()),
+    }
 }
 
 /// A custom theme that makes text green

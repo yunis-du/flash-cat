@@ -64,7 +64,10 @@ impl From<TabId> for usize {
 }
 
 impl std::fmt::Display for TabId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
         let text = match self {
             TabId::Sender => "Sender",
             TabId::Receiver => "Receiver",
@@ -81,8 +84,14 @@ pub struct TabLabel {
 }
 
 impl TabLabel {
-    pub fn new(text: &'static str, icon: &'static [u8]) -> Self {
-        Self { text, icon }
+    pub fn new(
+        text: &'static str,
+        icon: &'static [u8],
+    ) -> Self {
+        Self {
+            text,
+            icon,
+        }
     }
 }
 
@@ -115,15 +124,15 @@ impl TabsController {
                 settings_tab,
                 tabs_scrollable_offsets: [RelativeOffset::START; 3],
             },
-            Task::batch([
-                sender_task.map(Message::Sender),
-                receiver_task.map(Message::Receiver),
-                settings_task.map(Message::Settings),
-            ]),
+            Task::batch([sender_task.map(Message::Sender), receiver_task.map(Message::Receiver), settings_task.map(Message::Settings)]),
         )
     }
 
-    fn record_scrollable_offset(&mut self, index: usize, scrollable_offset: RelativeOffset) {
+    fn record_scrollable_offset(
+        &mut self,
+        index: usize,
+        scrollable_offset: RelativeOffset,
+    ) {
         self.tabs_scrollable_offsets[index] = scrollable_offset;
     }
 
@@ -131,15 +140,9 @@ impl TabsController {
         let index: usize = self.current_tab.into();
 
         match self.current_tab {
-            TabId::Sender => {
-                self.record_scrollable_offset(index, self.sender_tab.get_scrollable_offset())
-            }
-            TabId::Receiver => {
-                self.record_scrollable_offset(index, self.receiver_tab.get_scrollable_offset())
-            }
-            TabId::Settings => {
-                self.record_scrollable_offset(index, self.settings_tab.get_scrollable_offset())
-            }
+            TabId::Sender => self.record_scrollable_offset(index, self.sender_tab.get_scrollable_offset()),
+            TabId::Receiver => self.record_scrollable_offset(index, self.receiver_tab.get_scrollable_offset()),
+            TabId::Settings => self.record_scrollable_offset(index, self.settings_tab.get_scrollable_offset()),
         }
     }
 
@@ -152,20 +155,16 @@ impl TabsController {
         let index: usize = self.current_tab.into();
 
         match self.current_tab {
-            TabId::Sender => SenderTab::set_scrollable_offset(self.tabs_scrollable_offsets[index])
-                .map(Message::Sender),
-            TabId::Receiver => {
-                ReceiverTab::set_scrollable_offset(self.tabs_scrollable_offsets[index])
-                    .map(Message::Receiver)
-            }
-            TabId::Settings => {
-                SettingsTab::set_scrollable_offset(self.tabs_scrollable_offsets[index])
-                    .map(Message::Settings)
-            }
+            TabId::Sender => SenderTab::set_scrollable_offset(self.tabs_scrollable_offsets[index]).map(Message::Sender),
+            TabId::Receiver => ReceiverTab::set_scrollable_offset(self.tabs_scrollable_offsets[index]).map(Message::Receiver),
+            TabId::Settings => SettingsTab::set_scrollable_offset(self.tabs_scrollable_offsets[index]).map(Message::Settings),
         }
     }
 
-    pub fn switch_to_tab(&mut self, tab: TabId) -> Task<Message> {
+    pub fn switch_to_tab(
+        &mut self,
+        tab: TabId,
+    ) -> Task<Message> {
         self.record_tabs_scrollable_offsets();
 
         self.current_tab = tab;
@@ -180,13 +179,13 @@ impl TabsController {
     }
 
     pub fn subscription(&self) -> iced::Subscription<Message> {
-        iced::Subscription::batch([
-            self.sender_tab.subscription().map(Message::Sender),
-            self.receiver_tab.subscription().map(Message::Receiver),
-        ])
+        iced::Subscription::batch([self.sender_tab.subscription().map(Message::Sender), self.receiver_tab.subscription().map(Message::Receiver)])
     }
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(
+        &mut self,
+        message: Message,
+    ) -> Task<Message> {
         match message {
             Message::Sender(message) => self.sender_tab.update(message).map(Message::Sender),
             Message::Receiver(message) => self.receiver_tab.update(message).map(Message::Receiver),
@@ -195,11 +194,7 @@ impl TabsController {
     }
 
     pub fn get_labels(&self) -> [TabLabel; 3] {
-        [
-            SenderTab::tab_label(),
-            ReceiverTab::tab_label(),
-            SettingsTab::tab_label(),
-        ]
+        [SenderTab::tab_label(), ReceiverTab::tab_label(), SettingsTab::tab_label()]
     }
 
     pub fn view(&self) -> Element<'_, Message> {

@@ -29,8 +29,7 @@ impl Receive {
         assumeyes: bool,
         lan: bool,
     ) -> Result<Self> {
-        let receiver =
-            FlashCatReceiver::new(share_code, specify_relay, output, ClientType::Cli, lan)?;
+        let receiver = FlashCatReceiver::new(share_code, specify_relay, output, ClientType::Cli, lan)?;
         Ok(Self {
             receiver,
             assumeyes,
@@ -62,11 +61,8 @@ impl Receive {
                         }
                         if self.assumeyes {
                             println!();
-                            progress
-                                .update(send_req.num_files, send_req.max_file_name_length as usize);
-                            self.receiver
-                                .send_confirm(ReceiverConfirm::ReceiveConfirm(true))
-                                .await?;
+                            progress.update(send_req.num_files, send_req.max_file_name_length as usize);
+                            self.receiver.send_confirm(ReceiverConfirm::ReceiveConfirm(true)).await?;
                             continue;
                         }
                         print!(" ({})? (Y/n) ", HumanBytes(send_req.total_size).to_string());
@@ -75,15 +71,10 @@ impl Receive {
                         stdin().read_line(&mut input)?;
                         let input = input.trim();
                         if input.to_lowercase() == "y" || input.to_lowercase() == "yes" {
-                            progress
-                                .update(send_req.num_files, send_req.max_file_name_length as usize);
-                            self.receiver
-                                .send_confirm(ReceiverConfirm::ReceiveConfirm(true))
-                                .await?;
+                            progress.update(send_req.num_files, send_req.max_file_name_length as usize);
+                            self.receiver.send_confirm(ReceiverConfirm::ReceiveConfirm(true)).await?;
                         } else {
-                            self.receiver
-                                .send_confirm(ReceiverConfirm::ReceiveConfirm(false))
-                                .await?;
+                            self.receiver.send_confirm(ReceiverConfirm::ReceiveConfirm(false)).await?;
                             self.shutdown();
                             println!("Refuse to receive, exit...");
                             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -91,12 +82,7 @@ impl Receive {
                     }
                     ReceiverInteractionMessage::FileDuplication(file_duplication) => {
                         if self.assumeyes {
-                            self.receiver
-                                .send_confirm(ReceiverConfirm::FileConfirm((
-                                    true,
-                                    file_duplication.file_id,
-                                )))
-                                .await?;
+                            self.receiver.send_confirm(ReceiverConfirm::FileConfirm((true, file_duplication.file_id))).await?;
                             continue;
                         }
                         print!("overwrite '{}'? (Y/n) ", file_duplication.path);
@@ -105,28 +91,14 @@ impl Receive {
                         stdin().read_line(&mut input)?;
                         let input = input.trim();
                         if input.to_lowercase() == "y" || input.to_lowercase() == "yes" {
-                            self.receiver
-                                .send_confirm(ReceiverConfirm::FileConfirm((
-                                    true,
-                                    file_duplication.file_id,
-                                )))
-                                .await?;
+                            self.receiver.send_confirm(ReceiverConfirm::FileConfirm((true, file_duplication.file_id))).await?;
                         } else {
                             progress.skip(file_duplication.file_id);
-                            self.receiver
-                                .send_confirm(ReceiverConfirm::FileConfirm((
-                                    false,
-                                    file_duplication.file_id,
-                                )))
-                                .await?;
+                            self.receiver.send_confirm(ReceiverConfirm::FileConfirm((false, file_duplication.file_id))).await?;
                         }
                     }
                     ReceiverInteractionMessage::RecvNewFile(recv_new_file) => {
-                        progress.add_progress(
-                            recv_new_file.filename.as_str(),
-                            recv_new_file.file_id,
-                            recv_new_file.size,
-                        );
+                        progress.add_progress(recv_new_file.filename.as_str(), recv_new_file.file_id, recv_new_file.size);
                     }
                     ReceiverInteractionMessage::BreakPoint(break_point) => {
                         print!(

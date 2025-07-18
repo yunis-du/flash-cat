@@ -74,9 +74,10 @@ impl Default for Shutdown {
 }
 
 impl Debug for Shutdown {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Shutdown")
-            .field("is_terminated", &self.inner.0.load(Ordering::Relaxed))
-            .finish()
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        f.debug_struct("Shutdown").field("is_terminated", &self.inner.0.load(Ordering::Relaxed)).finish()
     }
 }

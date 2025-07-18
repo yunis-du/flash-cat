@@ -39,7 +39,10 @@ pub struct FileCollector {
 }
 
 impl FileCollector {
-    fn acc(&mut self, mut pc: Self) {
+    fn acc(
+        &mut self,
+        mut pc: Self,
+    ) {
         self.total_size += pc.total_size;
         self.num_files += pc.num_files;
         self.num_folders += pc.num_folders;
@@ -47,7 +50,10 @@ impl FileCollector {
         self.files.append(&mut pc.files);
     }
 
-    fn add_total_size(&mut self, total_size: u64) {
+    fn add_total_size(
+        &mut self,
+        total_size: u64,
+    ) {
         self.total_size += total_size;
     }
 
@@ -59,11 +65,17 @@ impl FileCollector {
         self.num_folders += 1;
     }
 
-    fn add_file(&mut self, file: FileInfo) {
+    fn add_file(
+        &mut self,
+        file: FileInfo,
+    ) {
         self.files.push(file);
     }
 
-    fn calc_max_file_name_length(&mut self, curr_file_name_legnth: usize) {
+    fn calc_max_file_name_length(
+        &mut self,
+        curr_file_name_legnth: usize,
+    ) {
         self.max_file_name_length = max(self.max_file_name_length, curr_file_name_legnth);
     }
 
@@ -83,65 +95,56 @@ pub fn collect_files<P: AsRef<Path>>(paths: &[P]) -> FileCollector {
                 .into_iter()
                 .filter_map(|entry| entry.ok())
                 .filter_map(|entry| match entry.metadata() {
-                    Ok(metadata) => {
-                        Some((metadata, entry.path().to_owned(), path.as_ref().to_owned()))
-                    }
+                    Ok(metadata) => Some((metadata, entry.path().to_owned(), path.as_ref().to_owned())),
                     Err(_) => None,
                 })
-                .fold(
-                    FileCollector::default(),
-                    |mut fc: FileCollector, (metadata, path, root)| {
-                        let file_name = path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string();
-                        let mut root_clone = root.clone();
-                        root_clone.pop();
-                        let relative_path = path.strip_prefix(root_clone.as_path()).unwrap();
-                        if metadata.is_file() {
-                            let file_name_legnth = file_name.len();
-                            let file_size = metadata.len();
-                            let file_info = FileInfo {
-                                file_id,
-                                name: file_name,
-                                access_path: path.to_string_lossy().to_string(),
-                                relative_path: relative_path.to_string_lossy().to_string(),
-                                #[cfg(unix)]
-                                mode: metadata.mode(),
-                                size: file_size,
-                                empty_dir: false,
-                            };
-                            file_id += 1;
-                            fc.add_file(file_info);
-                            fc.calc_max_file_name_length(file_name_legnth);
-                            fc.add_total_size(file_size);
-                            fc.count_num_files();
-                            fc
-                        } else if metadata.is_dir() {
-                            if let Ok(directory) = path.as_path().read_dir() {
-                                if directory.count() == 0 {
-                                    // empty directory
-                                    let file_info = FileInfo {
-                                        file_id: 0,
-                                        name: file_name,
-                                        access_path: path.to_string_lossy().to_string(),
-                                        relative_path: relative_path.to_string_lossy().to_string(),
-                                        #[cfg(unix)]
-                                        mode: metadata.mode(),
-                                        size: 0,
-                                        empty_dir: true,
-                                    };
-                                    fc.add_file(file_info);
-                                }
+                .fold(FileCollector::default(), |mut fc: FileCollector, (metadata, path, root)| {
+                    let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    let mut root_clone = root.clone();
+                    root_clone.pop();
+                    let relative_path = path.strip_prefix(root_clone.as_path()).unwrap();
+                    if metadata.is_file() {
+                        let file_name_legnth = file_name.len();
+                        let file_size = metadata.len();
+                        let file_info = FileInfo {
+                            file_id,
+                            name: file_name,
+                            access_path: path.to_string_lossy().to_string(),
+                            relative_path: relative_path.to_string_lossy().to_string(),
+                            #[cfg(unix)]
+                            mode: metadata.mode(),
+                            size: file_size,
+                            empty_dir: false,
+                        };
+                        file_id += 1;
+                        fc.add_file(file_info);
+                        fc.calc_max_file_name_length(file_name_legnth);
+                        fc.add_total_size(file_size);
+                        fc.count_num_files();
+                        fc
+                    } else if metadata.is_dir() {
+                        if let Ok(directory) = path.as_path().read_dir() {
+                            if directory.count() == 0 {
+                                // empty directory
+                                let file_info = FileInfo {
+                                    file_id: 0,
+                                    name: file_name,
+                                    access_path: path.to_string_lossy().to_string(),
+                                    relative_path: relative_path.to_string_lossy().to_string(),
+                                    #[cfg(unix)]
+                                    mode: metadata.mode(),
+                                    size: 0,
+                                    empty_dir: true,
+                                };
+                                fc.add_file(file_info);
                             }
-                            fc.count_num_folders();
-                            fc
-                        } else {
-                            fc
                         }
-                    },
-                )
+                        fc.count_num_folders();
+                        fc
+                    } else {
+                        fc
+                    }
+                })
         })
         .fold(FileCollector::default(), |mut fc, cur| {
             fc.acc(cur);
@@ -170,7 +173,11 @@ pub fn pick_up_folder<P: AsRef<Path>>(paths: &[P]) -> Vec<PathBuf> {
         .filter_map(|p| Some(p.as_ref()))
         .filter_map(|p| {
             if let Ok(m) = p.metadata() {
-                if m.is_dir() { Some(p.to_owned()) } else { None }
+                if m.is_dir() {
+                    Some(p.to_owned())
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -179,13 +186,14 @@ pub fn pick_up_folder<P: AsRef<Path>>(paths: &[P]) -> Vec<PathBuf> {
 }
 
 /// Zip folder, print compress progress if show_progress is true.
-pub fn zip_folder<P: AsRef<Path>>(file_name: String, path: P, shutdown: Shutdown) -> Result<()> {
+pub fn zip_folder<P: AsRef<Path>>(
+    file_name: String,
+    path: P,
+    shutdown: Shutdown,
+) -> Result<()> {
     let path = path.as_ref();
     if path.is_file() {
-        return Err(anyhow::Error::msg(format!(
-            "{:?} is file.",
-            path.as_os_str()
-        )));
+        return Err(anyhow::Error::msg(format!("{:?} is file.", path.as_os_str())));
     }
 
     if file_name.is_empty() {
@@ -204,9 +212,7 @@ pub fn zip_folder<P: AsRef<Path>>(file_name: String, path: P, shutdown: Shutdown
 
     let file = File::create(file_name.as_str())?;
     let mut zip = ZipWriter::new(file);
-    let options = SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Bzip2)
-        .unix_permissions(0o755);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Bzip2).unix_permissions(0o755);
 
     let folder_path = path.to_string_lossy().to_string();
     let folder_path = if !folder_path.ends_with("/") {
@@ -219,54 +225,43 @@ pub fn zip_folder<P: AsRef<Path>>(file_name: String, path: P, shutdown: Shutdown
     #[cfg(feature = "progress")]
     let pb = {
         let pb = ProgressBar::new(0);
-        pb.set_style(
-            ProgressStyle::with_template("{spinner:.green} {prefix:.blod.green} {wide_msg}")
-                .unwrap(),
-        );
+        pb.set_style(ProgressStyle::with_template("{spinner:.green} {prefix:.blod.green} {wide_msg}").unwrap());
         pb.set_prefix(format!("compressing..."));
         pb
     };
 
-    WalkDir::new(folder_path.as_str())
-        .contents_first(true)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .any(|entry| {
-            let path = entry.path();
-            let path_string = path.to_string_lossy().as_ref().to_string();
-            let path_in_zip = format!(
-                "{}/{}",
-                root_dir,
-                path_string.replace(folder_path.as_str(), "")
-            );
-            if path.is_dir() {
-                if let Ok(read_dir) = fs::read_dir(path) {
-                    if read_dir.count() == 0 {
-                        // add empty directory
-                        match zip.add_directory_from_path(path, options) {
-                            Ok(_) => (),
-                            Err(e) => {
-                                println!("add_directory [{}] error: {}", path_string, e);
-                                shutdown.shutdown();
-                            }
+    WalkDir::new(folder_path.as_str()).contents_first(true).into_iter().filter_map(|entry| entry.ok()).any(|entry| {
+        let path = entry.path();
+        let path_string = path.to_string_lossy().as_ref().to_string();
+        let path_in_zip = format!("{}/{}", root_dir, path_string.replace(folder_path.as_str(), ""));
+        if path.is_dir() {
+            if let Ok(read_dir) = fs::read_dir(path) {
+                if read_dir.count() == 0 {
+                    // add empty directory
+                    match zip.add_directory_from_path(path, options) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            println!("add_directory [{}] error: {}", path_string, e);
+                            shutdown.shutdown();
                         }
                     }
                 }
             }
-            if path.is_file() {
-                let mut file = File::open(&path).unwrap();
+        }
+        if path.is_file() {
+            let mut file = File::open(&path).unwrap();
 
-                #[cfg(feature = "progress")]
-                {
-                    pb.set_message(path_in_zip.to_owned());
-                    pb.inc(1);
-                }
-
-                zip.start_file(path_in_zip, options).unwrap();
-                io::copy(&mut file, &mut zip).unwrap();
+            #[cfg(feature = "progress")]
+            {
+                pb.set_message(path_in_zip.to_owned());
+                pb.inc(1);
             }
-            shutdown.is_terminated()
-        });
+
+            zip.start_file(path_in_zip, options).unwrap();
+            io::copy(&mut file, &mut zip).unwrap();
+        }
+        shutdown.is_terminated()
+    });
 
     #[cfg(feature = "progress")]
     pb.finish_and_clear();
@@ -291,11 +286,7 @@ pub fn unzip<P: AsRef<Path>>(zip_files: &[P]) -> Result<()> {
         let root_dir = match zip_file_path.file_name() {
             Some(file_name) => {
                 let mut root_dir = "";
-                let file_name = file_name
-                    .to_str()
-                    .unwrap_or_default()
-                    .split(".")
-                    .collect::<Vec<_>>();
+                let file_name = file_name.to_str().unwrap_or_default().split(".").collect::<Vec<_>>();
                 if file_name.len() > 0 {
                     root_dir = file_name.get(0).unwrap();
                 }
@@ -384,7 +375,10 @@ pub fn reset_path(path: &str) -> String {
 ///
 /// # Errors
 /// Returns an error if the file cannot be opened or read.
-pub fn missing_chunks(path: impl AsRef<Path>, chunk_size: usize) -> Result<(usize, usize, f64)> {
+pub fn missing_chunks(
+    path: impl AsRef<Path>,
+    chunk_size: usize,
+) -> Result<(usize, usize, f64)> {
     let f = File::open(path)?;
     let fsize = f.metadata()?.len();
 
@@ -414,8 +408,7 @@ pub fn missing_chunks(path: impl AsRef<Path>, chunk_size: usize) -> Result<(usiz
         }
     }
 
-    let percent =
-        ((saved_chunks * chunk_size) as f64 / fsize as f64 * 100.0 * 100.0).round() / 100.0;
+    let percent = ((saved_chunks * chunk_size) as f64 / fsize as f64 * 100.0 * 100.0).round() / 100.0;
 
     Ok((saved_chunks, missing_chunks, percent))
 }

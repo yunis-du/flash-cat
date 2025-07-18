@@ -36,12 +36,7 @@ pub fn run(fcs: Arc<FlashCatSender>) -> impl Stream<Item = Result<(u64, Progress
                     let _ = sender.send((file_id, Progress::Skip)).await;
                 }
                 SenderInteractionMessage::FileProgress(file_progress) => {
-                    let _ = sender
-                        .send((
-                            file_progress.file_id,
-                            Progress::Sent(file_progress.position as f32),
-                        ))
-                        .await;
+                    let _ = sender.send((file_progress.file_id, Progress::Sent(file_progress.position as f32))).await;
                 }
                 SenderInteractionMessage::FileProgressFinish(file_id) => {
                     let _ = sender.send((file_id, Progress::Finished)).await;
@@ -50,10 +45,8 @@ pub fn run(fcs: Arc<FlashCatSender>) -> impl Stream<Item = Result<(u64, Progress
                     return Err(Error::OtherClose);
                 }
                 SenderInteractionMessage::SendDone => {
-                    *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Message(
-                        "Send files done. Waiting for the receiver to receive finish..."
-                            .to_string(),
-                    );
+                    *SENDER_NOTIFICATION.write().unwrap() =
+                        SenderNotification::Message("Send files done. Waiting for the receiver to receive finish...".to_string());
                     let _ = sender.send((0, Progress::Done)).await;
                 }
                 SenderInteractionMessage::Completed => {
