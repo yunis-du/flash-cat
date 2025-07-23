@@ -241,7 +241,12 @@ impl FlashCatReceiver {
                 }
             }
         } else {
-            endpoint
+            if relay.is_some() {
+                let relay = relay.unwrap();
+                get_endpoint(format!("http://{}:{}", relay.relay_ip, relay.relay_port))?
+            } else {
+                endpoint
+            }
         };
 
         let encryptor = self.encryptor.clone();
@@ -282,6 +287,7 @@ impl FlashCatReceiver {
         loop {
             let message = tokio::select! {
                 _ = shutdown.wait() => {
+                    println!("recv shutdown");
                     client.close(CloseRequest {
                         encrypted_share_code: encryptor.encrypt_share_code_bytes(),
                     })

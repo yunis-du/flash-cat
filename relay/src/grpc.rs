@@ -118,7 +118,7 @@ impl RelayService for GrpcServer {
             None => return Err(Status::invalid_argument("missing first message")),
         };
 
-        let (tx, rx) = mpsc::channel(16);
+        let (tx, rx) = mpsc::channel(1024);
 
         let (session, character) = match first_update.relay_message {
             Some(RelayMessage::Join(join)) => {
@@ -209,8 +209,7 @@ async fn handle_streaming(
             }
             // Exit on a session shutdown signal.
             _ = session.terminated() => {
-                let msg = String::from("disconnecting because session is closed");
-                send_msg(tx, RelayMessage::Error(msg)).await;
+                send_err(tx, "disconnecting because session terminated".into()).await;
                 return Ok(());
             }
         }
@@ -250,7 +249,22 @@ async fn send_msg(
     let update = Ok(RelayUpdate {
         relay_message: Some(message),
     });
-    tx.send(update).await.is_ok()
+    let max_retries = 3;
+    let mut retry_count = 0;
+    loop {
+        match tx.send(update.clone()).await {
+            Ok(_) => return true,
+            Err(e) => {
+                error!("Failed to send relay update: {}, retry: {}", e, retry_count);
+                retry_count += 1;
+                if retry_count >= max_retries {
+                    error!("Max retries reached, giving up sending update");
+                    return false;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
 }
 
 /// Attempt to send an error string to the client.

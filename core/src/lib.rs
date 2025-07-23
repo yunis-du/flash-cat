@@ -4,7 +4,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use tonic::transport::Endpoint;
 
-use flash_cat_common::consts::{DEFAULT_HTTP2_KEEPALIVE_INTERVAL, DEFAULT_HTTP2_KEEPALIVE_TIMEOUT};
+use flash_cat_common::consts::{DEFAULT_GRPC_TIMEOUT, DEFAULT_HTTP2_KEEPALIVE_INTERVAL, DEFAULT_HTTP2_KEEPALIVE_TIMEOUT, DEFAULT_TCP_KEEPALIVE};
 
 pub mod receiver;
 pub mod sender;
@@ -102,7 +102,11 @@ pub struct RecvNewFile {
 }
 
 fn get_endpoint(s: impl Into<Bytes>) -> Result<Endpoint> {
-    let endpoint =
-        Endpoint::from_shared(s.into())?.http2_keep_alive_interval(DEFAULT_HTTP2_KEEPALIVE_INTERVAL).keep_alive_timeout(DEFAULT_HTTP2_KEEPALIVE_TIMEOUT);
+    let endpoint = Endpoint::from_shared(s.into())?
+        .http2_keep_alive_interval(DEFAULT_HTTP2_KEEPALIVE_INTERVAL)
+        .keep_alive_timeout(DEFAULT_HTTP2_KEEPALIVE_TIMEOUT)
+        .http2_adaptive_window(true) // enable adaptive window size
+        .tcp_keepalive(Some(DEFAULT_TCP_KEEPALIVE)) // set TCP keepalive
+        .timeout(DEFAULT_GRPC_TIMEOUT); // set overall request timeout
     Ok(endpoint)
 }
