@@ -287,7 +287,6 @@ impl FlashCatReceiver {
         loop {
             let message = tokio::select! {
                 _ = shutdown.wait() => {
-                    println!("recv shutdown");
                     client.close(CloseRequest {
                         encrypted_share_code: encryptor.encrypt_share_code_bytes(),
                     })
