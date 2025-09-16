@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status, Streaming};
@@ -38,10 +38,6 @@ impl RelayService for GrpcServer {
         &self,
         request: Request<JoinRequest>,
     ) -> RR<JoinResponse> {
-        let remote_addr = match request.remote_addr() {
-            Some(addr) => addr.to_string(),
-            None => "unknown".to_string(),
-        };
         let relay_port = match request.local_addr() {
             Some(local_addr) => local_addr.port() as u32,
             None => 0,
@@ -61,7 +57,7 @@ impl RelayService for GrpcServer {
                     Character::Sender => match self.0.lookup(&session_name) {
                         Some(_) => return Err(Status::already_exists("duplicate session_name")),
                         None => {
-                            info!("new sender(addr: {remote_addr}) incoming");
+                            debug!("new sender({session_name}) incoming");
                             let metadata = Metadata {
                                 encrypted_share_code: id.encrypted_share_code,
                                 sender_local_relay: request.sender_local_relay,
@@ -75,6 +71,7 @@ impl RelayService for GrpcServer {
                             return Err(Status::not_found("Not found, Please check share code."));
                         }
                         Some(session) => {
+                            debug!("new receiver({session_name}) incoming");
                             sender_local_relay = session.metadata().sender_local_relay.clone();
                         }
                     },
@@ -116,6 +113,11 @@ impl RelayService for GrpcServer {
         &self,
         request: Request<Streaming<RelayUpdate>>,
     ) -> RR<Self::ChannelStream> {
+        let remote_addr = match request.remote_addr() {
+            Some(addr) => addr.to_string(),
+            None => "unknown".to_string(),
+        };
+
         let mut stream = request.into_inner();
         let first_update = match stream.next().await {
             Some(result) => result?,
@@ -146,11 +148,14 @@ impl RelayService for GrpcServer {
             if let Err(e) = session.broadcast(RelayMessage::Ready(Ready {})).await {
                 error!("broadcast failed: {e}");
             }
+            info!("receiver(addr: {remote_addr}) started channel");
+        } else {
+            info!("sender(addr: {remote_addr}) started channel");
         }
 
         tokio::spawn(async move {
             if let Err(err) = handle_streaming(&tx, &session, stream, character).await {
-                warn!("connection exiting early due to an error {err}");
+                warn!("connection(addr: {remote_addr}) exiting early due to an error {err}");
             }
         });
 
