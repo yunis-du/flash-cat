@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status, Streaming};
@@ -38,6 +38,10 @@ impl RelayService for GrpcServer {
         &self,
         request: Request<JoinRequest>,
     ) -> RR<JoinResponse> {
+        let remote_addr = match request.remote_addr() {
+            Some(addr) => addr.to_string(),
+            None => "unknown".to_string(),
+        };
         let relay_port = match request.local_addr() {
             Some(local_addr) => local_addr.port() as u32,
             None => 0,
@@ -57,7 +61,7 @@ impl RelayService for GrpcServer {
                     Character::Sender => match self.0.lookup(&session_name) {
                         Some(_) => return Err(Status::already_exists("duplicate session_name")),
                         None => {
-                            debug!("new sharer[{session_name}] incoming");
+                            info!("new sender(addr: {remote_addr}) incoming");
                             let metadata = Metadata {
                                 encrypted_share_code: id.encrypted_share_code,
                                 sender_local_relay: request.sender_local_relay,
@@ -159,7 +163,6 @@ impl RelayService for GrpcServer {
     ) -> RR<CloseResponse> {
         let request = request.into_inner();
         let session_name = String::from_utf8_lossy(request.encrypted_share_code.as_ref()).to_string();
-        info!("closing session {}", session_name);
         if let Some(session) = self.0.lookup(&session_name) {
             if let Err(e) = session.broadcast(RelayMessage::Terminated(Terminated {})).await {
                 error!("broadcast failed: {e}");
@@ -168,7 +171,7 @@ impl RelayService for GrpcServer {
         // wait for broadcast message send to end
         tokio::time::sleep(Duration::from_millis(100)).await;
         if let Err(err) = self.0.close_session(&session_name).await {
-            error!("failed to close session {}, error: {}", session_name, err);
+            error!("failed to close session, error: {}", err);
             return Err(Status::internal(err.to_string()));
         }
         Ok(Response::new(CloseResponse {}))
