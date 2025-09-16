@@ -26,6 +26,7 @@ tonic.workspace = true
 tonic-reflection.workspace = true
 tower = { version = "0.5", features = ["steer"] }
 tower-http = { version = "0.6", features = ["fs", "redirect", "trace"] }
+nanoid = "0.4.0"
 
 [build-dependencies]
 built.workspace = true

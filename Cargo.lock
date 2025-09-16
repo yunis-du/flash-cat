@@ -1637,6 +1637,7 @@ dependencies = [
  "dashmap",
  "flash_cat_common",
  "log",
+ "nanoid",
  "parking_lot 0.12.4",
  "serde",
  "tokio",
@@ -3136,6 +3137,15 @@ dependencies = [
  "termcolor",
  "thiserror 1.0.69",
  "unicode-xid",
+]
+
+[[package]]
+name = "nanoid"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ffa00dec017b5b1a8b7cf5e2c008bfda1aa7e0697ac1508b491fdf2622fb4d8"
+dependencies = [
+ "rand 0.8.5",
 ]
 
 [[package]]

@@ -40,26 +40,35 @@ impl SessionUserPair {
 
 #[derive(Debug)]
 pub struct Session {
+    /// Session id.
+    id: String,
     /// Static metadata for this session.
     metadata: Metadata,
-
+    /// User pair for this session.
     user_pair: SessionUserPair,
-
     /// Timestamp of the last backend client message from an active connection.
     last_accessed: Mutex<Instant>,
-
     /// Set when this session has been closed and removed.
+    ///
+    /// This is used to ensure that we don't send any more messages to the
+    /// session after it has been closed.
     shutdown: Shutdown,
 }
 
 impl Session {
     pub fn new(metadata: Metadata) -> Self {
+        let id = nanoid::nanoid!(10);
         Session {
+            id,
             metadata,
             last_accessed: Mutex::new(Instant::now()),
             user_pair: SessionUserPair::new(),
             shutdown: Shutdown::new(),
         }
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     pub fn metadata(&self) -> &Metadata {

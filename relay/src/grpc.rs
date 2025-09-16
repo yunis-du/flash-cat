@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status, Streaming};
@@ -46,7 +46,7 @@ impl RelayService for GrpcServer {
         let request = request.into_inner();
         match request.id {
             Some(id) => {
-                let session_name = String::from_utf8_lossy(id.encrypted_share_code.as_ref()).to_string();
+                let session_code = String::from_utf8_lossy(id.encrypted_share_code.as_ref()).to_string();
                 let character = match Character::try_from(id.character) {
                     Ok(character) => character,
                     Err(_) => return Err(Status::invalid_argument("unknown character")),
@@ -54,24 +54,24 @@ impl RelayService for GrpcServer {
                 let mut sender_local_relay = None;
 
                 match character {
-                    Character::Sender => match self.0.lookup(&session_name) {
-                        Some(_) => return Err(Status::already_exists("duplicate session_name")),
+                    Character::Sender => match self.0.lookup(&session_code) {
+                        Some(_) => return Err(Status::already_exists("duplicate session_code")),
                         None => {
-                            debug!("new sender({session_name}) incoming");
+                            debug!("new sender({session_code}) incoming");
                             let metadata = Metadata {
                                 encrypted_share_code: id.encrypted_share_code,
                                 sender_local_relay: request.sender_local_relay,
                             };
                             let session = Arc::new(Session::new(metadata));
-                            self.0.insert(&session_name, session.clone());
+                            self.0.insert(&session_code, session.clone());
                         }
                     },
-                    Character::Receiver => match self.0.lookup(&session_name) {
+                    Character::Receiver => match self.0.lookup(&session_code) {
                         None => {
                             return Err(Status::not_found("Not found, Please check share code."));
                         }
                         Some(session) => {
-                            debug!("new receiver({session_name}) incoming");
+                            debug!("new receiver({session_code}) incoming");
                             sender_local_relay = session.metadata().sender_local_relay.clone();
                         }
                     },
@@ -128,12 +128,12 @@ impl RelayService for GrpcServer {
 
         let (session, character) = match first_update.relay_message {
             Some(RelayMessage::Join(join)) => {
-                let session_name = String::from_utf8_lossy(join.encrypted_share_code.as_ref()).to_string();
+                let session_code = String::from_utf8_lossy(join.encrypted_share_code.as_ref()).to_string();
                 let character = match Character::try_from(join.character) {
                     Ok(character) => character,
                     Err(_) => return Err(Status::invalid_argument("unknown character")),
                 };
-                let session = match self.0.lookup(&session_name) {
+                let session = match self.0.lookup(&session_code) {
                     None => return Err(Status::not_found("Not found, Please check share code.")),
                     Some(session) => session,
                 };
@@ -148,14 +148,17 @@ impl RelayService for GrpcServer {
             if let Err(e) = session.broadcast(RelayMessage::Ready(Ready {})).await {
                 error!("broadcast failed: {e}");
             }
-            info!("receiver(addr: {remote_addr}) started channel");
+            info!("receiver(addr: {remote_addr}, session_id: {}) started channel", session.id());
         } else {
-            info!("sender(addr: {remote_addr}) started channel");
+            info!("sender(addr: {remote_addr}, session_id: {}) started channel", session.id());
         }
 
         tokio::spawn(async move {
             if let Err(err) = handle_streaming(&tx, &session, stream, character).await {
-                warn!("connection(addr: {remote_addr}) exiting early due to an error {err}");
+                error!(
+                    "connection(addr: {remote_addr}, session_id: {}) exiting early due to an error {err}",
+                    session.id()
+                );
             }
         });
 
@@ -167,15 +170,15 @@ impl RelayService for GrpcServer {
         request: Request<CloseRequest>,
     ) -> RR<CloseResponse> {
         let request = request.into_inner();
-        let session_name = String::from_utf8_lossy(request.encrypted_share_code.as_ref()).to_string();
-        if let Some(session) = self.0.lookup(&session_name) {
+        let session_code = String::from_utf8_lossy(request.encrypted_share_code.as_ref()).to_string();
+        if let Some(session) = self.0.lookup(&session_code) {
             if let Err(e) = session.broadcast(RelayMessage::Terminated(Terminated {})).await {
                 error!("broadcast failed: {e}");
             }
         }
         // wait for broadcast message send to end
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if let Err(err) = self.0.close_session(&session_name).await {
+        if let Err(err) = self.0.close_session(&session_code).await {
             error!("failed to close session, error: {}", err);
             return Err(Status::internal(err.to_string()));
         }
