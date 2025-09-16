@@ -60,7 +60,7 @@ impl SettingsTab {
             }
         }
     }
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         let settings_body = scrollable(
             column![
                 self.appearance_settings.view().map(Message::Appearance),

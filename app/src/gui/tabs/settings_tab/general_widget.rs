@@ -64,7 +64,7 @@ impl General {
         }
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         let content = column![text("General").size(21).style(styles::text_styles::accent_color_theme)].padding(5).spacing(5);
 
         let relay_addr_widget = column![

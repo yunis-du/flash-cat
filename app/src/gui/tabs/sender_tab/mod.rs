@@ -292,7 +292,7 @@ impl SenderTab {
         Task::none()
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         let sender_state = SENDER_STATE.read().unwrap();
 
         let mut pick_files_button = button("Files");

@@ -226,7 +226,7 @@ impl ReceiverTab {
         Task::none()
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         let share_code_input = row![text("Share Code"), horizontal_space(), text_input("", &self.share_code).on_input(Message::ShareCodeChanged).padding(5),]
             .spacing(5)
             .padding(5)

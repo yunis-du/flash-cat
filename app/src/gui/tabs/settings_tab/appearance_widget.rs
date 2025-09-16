@@ -30,7 +30,7 @@ impl Appearance {
         }
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         let content = column![text("Appearance").size(21).style(styles::text_styles::accent_color_theme)].padding(5).spacing(5);
 
         let theme_text = text("Theme").size(18);

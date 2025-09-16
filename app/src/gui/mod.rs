@@ -56,7 +56,7 @@ impl FlashCatApp {
         }
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         column![
             logo_widget(),
             self.title_bar.view(&self.tabs_controller.get_labels()).map(Message::TitleBar),

@@ -85,7 +85,7 @@ impl ProgressBar {
         iced::Subscription::none()
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         let (current_progress, per_sec) = match &self.state {
             State::Idle => (0.0, 0),
             State::Progress(progress) => (*progress, self.pb.per_sec() as u64),
