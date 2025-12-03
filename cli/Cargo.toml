@@ -27,6 +27,10 @@ log.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 indicatif.workspace = true
+zip.workspace = true
+reqwest = { version = "0.12.24", features = ["rustls-tls"] }
+flate2 = "1.1.5"
+tar = "0.4.44"
 
 [build-dependencies]
 built.workspace = true

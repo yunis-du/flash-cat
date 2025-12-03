@@ -11,7 +11,7 @@ use tokio::signal::ctrl_c;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
 
-use flash_cat_cli::{built_info, receive::Receive, send::Send};
+use flash_cat_cli::{built_info, receive::Receive, send::Send, update};
 use flash_cat_common::{VersionInfo, init_logger, utils::fs::is_file};
 use flash_cat_relay::relay::Relay;
 
@@ -34,6 +34,8 @@ enum SubCmd {
     Recv(RecvCmd),
     /// Start relay server
     Relay(RelayCmd),
+    /// Update to the latest version
+    Update,
 }
 
 #[derive(Parser, Debug)]
@@ -103,6 +105,11 @@ const VERSION_INFO: &'static VersionInfo = &VersionInfo {
     commit_hash: built_info::GIT_COMMIT_HASH,
     build_time: built_info::BUILT_TIME_UTC,
 };
+
+#[tokio::main]
+async fn update() -> Result<()> {
+    update::update().await
+}
 
 #[tokio::main]
 async fn send(send_cmd: SendCmd) -> Result<()> {
@@ -253,6 +260,7 @@ fn main() -> ExitCode {
         println!("{}", VERSION_INFO);
         return ExitCode::SUCCESS;
     }
+
     if cmd.sub_cmd.is_some() {
         match cmd.sub_cmd.unwrap() {
             SubCmd::Send(send_cmd) => {
@@ -277,6 +285,15 @@ fn main() -> ExitCode {
                 init_logger(relay_cmd.log_level, relay_cmd.log_file);
                 let addr = SocketAddr::new(relay_cmd.ip, relay_cmd.port);
                 return match start_relay(addr, relay_cmd.external_ip) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(err) => {
+                        println!("{err:?}");
+                        ExitCode::FAILURE
+                    }
+                };
+            }
+            SubCmd::Update => {
+                return match update() {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {
                         println!("{err:?}");
