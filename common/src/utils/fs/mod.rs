@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Result, bail};
 #[cfg(feature = "progress")]
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressState, ProgressStyle};
 use walkdir::WalkDir;
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
@@ -220,12 +220,49 @@ pub fn zip_folder<P: AsRef<Path>>(
     let root_dir = file_name.strip_suffix(".zip").unwrap_or(&file_name);
 
     #[cfg(feature = "progress")]
-    let pb = {
-        let pb = ProgressBar::new(0);
-        pb.set_style(ProgressStyle::with_template("{spinner:.green} {prefix:.bold.green} {wide_msg}").unwrap());
-        pb.set_prefix("compressing...");
-        pb
+    let (total_size, total_files) = {
+        let mut total_size = 0u64;
+        let mut total_files = 0u64;
+        for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+            if entry.path().is_file() {
+                total_size += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                total_files += 1;
+            }
+        }
+        (total_size, total_files)
     };
+
+    #[cfg(feature = "progress")]
+    let (multi, spinner, progress_bar, counter_width) = {
+        use std::fmt::Write;
+
+        let multi = MultiProgress::new();
+
+        // Calculate counter width for alignment (e.g., "(999/999)" = 9 chars)
+        let counter_width = format!("({}/{})", total_files, total_files).len();
+
+        // Line 1: spinner with file info, counter fixed at right
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(ProgressStyle::with_template("{spinner:.green} {prefix:.bold.green} {msg}").unwrap());
+        let spinner = multi.add(spinner);
+
+        // Line 2: progress bar
+        let progress_bar = ProgressBar::new(total_size);
+        progress_bar.set_style(
+            ProgressStyle::with_template("[{bar:50.cyan/blue}] {bytes}/{total_bytes} ({percent}%)")
+                .unwrap()
+                .with_key("percent", |state: &ProgressState, w: &mut dyn Write| {
+                    write!(w, "{:.1}", state.fraction() * 100.0).unwrap()
+                })
+                .progress_chars("#>-"),
+        );
+        let progress_bar = multi.add(progress_bar);
+
+        (multi, spinner, progress_bar, counter_width)
+    };
+
+    #[cfg(feature = "progress")]
+    let mut processed_files = 0u64;
 
     for entry in WalkDir::new(path).contents_first(true).into_iter().filter_map(|e| e.ok()) {
         if shutdown.is_terminated() {
@@ -245,18 +282,34 @@ pub fn zip_folder<P: AsRef<Path>>(
         } else if entry_path.is_file() {
             #[cfg(feature = "progress")]
             {
-                pb.set_message(path_in_zip.clone());
-                pb.inc(1);
+                processed_files += 1;
+
+                let display_path = entry_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+
+                let counter = format!("({}/{})", processed_files, total_files);
+                spinner.set_message(format!("{:>width$}", counter, width = counter_width));
+                spinner.set_prefix(format!("Compressing {:<width$}", display_path, width = 50));
             }
 
             zip.start_file(&path_in_zip, options)?;
             let mut file = File::open(entry_path)?;
             io::copy(&mut file, &mut zip)?;
+
+            #[cfg(feature = "progress")]
+            {
+                let file_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                progress_bar.inc(file_size);
+                spinner.inc(1);
+            }
         }
     }
 
     #[cfg(feature = "progress")]
-    pb.finish_and_clear();
+    {
+        spinner.finish_and_clear();
+        progress_bar.finish_and_clear();
+        let _ = multi.clear();
+    }
 
     zip.finish()?;
     Ok(())
