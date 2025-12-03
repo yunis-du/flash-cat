@@ -3,7 +3,7 @@ use std::{
     process::ExitCode,
 };
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 use log::info;
 #[cfg(windows)]
@@ -164,7 +164,7 @@ async fn recv(recv_cmd: RecvCmd) -> Result<()> {
 
     if recv_cmd.output.is_some() {
         if is_file(recv_cmd.output.clone().unwrap().as_str()) {
-            return Err(anyhow::Error::msg("The output path is a file."));
+            bail!("The output path is a file.");
         }
     }
 

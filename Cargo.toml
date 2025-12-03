@@ -29,9 +29,9 @@ built = { version = "0.8", features = ["chrono", "git2"] }
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4.35"
 clap = { version = "4.5", features = ["derive", "env"] }
-confy = "1.0"
+confy = "2.0"
 dashmap = "6"
-indicatif = "0.17"
+indicatif = "0.18"
 log = "0.4"
 parking_lot = "0.12"
 prost = "0"
@@ -39,7 +39,9 @@ rand = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-tonic = { version = "0.13", features = ["tls-ring", "tls-webpki-roots"] }
-tonic-build = "0.13"
-tonic-reflection = "0.13"
+tonic = { version = "0.14", features = ["tls-ring", "tls-webpki-roots"] }
+tonic-build = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
+tonic-reflection = "0.14"
 zip = "6.0.0"

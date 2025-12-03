@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use indicatif::HumanBytes;
 use tokio_stream::StreamExt;
 
@@ -40,9 +40,9 @@ impl Receive {
     pub async fn run(&self) -> Result<()> {
         let mut stream = Arc::new(self.receiver.clone()).start().await.map_err(|e| {
             if e.to_string().contains("NotFound") {
-                anyhow::Error::msg("Not found, Please check share code.")
+                anyhow!("Not found, Please check share code.")
             } else {
-                anyhow::Error::msg(format!("An error occurred: {}", e.to_string()))
+                anyhow!(format!("An error occurred: {}", e.to_string()))
             }
         })?;
         let mut progress = Progress::new(1, 10);

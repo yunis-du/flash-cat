@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::Path, pin::Pin, sync::Arc, time::Duration};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use bytes::{Bytes, BytesMut};
 use flash_cat_common::{
     Shutdown, compare_versions,
@@ -272,11 +272,11 @@ impl FlashCatSender {
             match join_response_message {
                 join_response::JoinResponseMessage::Success(join_success) => (join_success.relay, join_success.client_latest_version),
                 join_response::JoinResponseMessage::Failed(join_failed) => {
-                    return Err(anyhow::Error::msg(join_failed.error_msg));
+                    bail!(join_failed.error_msg);
                 }
             }
         } else {
-            return Err(anyhow::Error::msg("can't get relay info"));
+            bail!("can't get relay info");
         };
 
         match self.client_type {

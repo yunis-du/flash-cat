@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use tokio::{
     fs,
     io::{AsyncSeekExt, AsyncWriteExt, SeekFrom},
@@ -175,11 +175,11 @@ impl FlashCatReceiver {
                     join_success.client_latest_version,
                 ),
                 join_response::JoinResponseMessage::Failed(join_failed) => {
-                    return Err(anyhow::Error::msg(join_failed.error_msg));
+                    bail!(join_failed.error_msg);
                 }
             }
         } else {
-            return Err(anyhow::Error::msg("can't get relay ip and port"));
+            bail!("can't get relay ip and port");
         };
 
         match self.client_type {
@@ -493,7 +493,7 @@ impl FlashCatReceiver {
                             }
                             SenderMessage::BreakPoint(break_point) => {
                                 if !recv_files.contains_key(&break_point.file_id) {
-                                    return Err(anyhow::Error::msg("receive file failed"));
+                                    bail!("receive file failed");
                                 }
                                 let recv_file = recv_files.get_mut(&break_point.file_id).unwrap();
                                 recv_file.progress = break_point.position;
@@ -501,14 +501,14 @@ impl FlashCatReceiver {
                             }
                             SenderMessage::FileData(file_data) => {
                                 if !recv_files.contains_key(&file_data.file_id) {
-                                    return Err(anyhow::Error::msg("receive file failed"));
+                                    bail!("receive file failed");
                                 }
                                 let recv_file = recv_files.get_mut(&file_data.file_id).unwrap();
                                 let encryptor = encryptor.clone();
                                 let data = match encryptor.decrypt(file_data.data.as_ref()) {
                                     Ok(data) => data,
                                     Err(e) => {
-                                        return Err(anyhow::Error::msg(format!("decrypt failed: {e}")));
+                                        bail!(format!("decrypt failed: {e}"));
                                     }
                                 };
                                 recv_file.write(&data).await?;

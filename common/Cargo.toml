@@ -14,18 +14,19 @@ chrono.workspace = true
 prost.workspace = true
 tokio.workspace = true
 tonic.workspace = true
+tonic-prost.workspace = true
 log.workspace = true
 rand.workspace = true
 indicatif.workspace = true
+zip.workspace = true
 walkdir = "2.5.0"
-zip = "3.0"
 sha2 = "0.10.8"
 hex = "0.4.3"
 aes-gcm = "0.10.3"
 fern = { version = "0.7", features = ["colored", "date-based"] }
 
 [build-dependencies]
-tonic-build.workspace = true
+tonic-prost-build.workspace = true
 
 [features]
 progress = []

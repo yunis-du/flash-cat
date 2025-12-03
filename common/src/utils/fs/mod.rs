@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 #[cfg(feature = "progress")]
 use indicatif::{ProgressBar, ProgressStyle};
 use walkdir::WalkDir;
@@ -157,10 +157,7 @@ pub fn paths_exist<P: AsRef<Path>>(paths: &[P]) -> Result<()> {
     for path in paths {
         let path = path.as_ref();
         if !path.exists() {
-            return Err(anyhow::Error::msg(format!(
-                "{}: no such file or directory",
-                path.to_string_lossy()
-            )));
+            bail!(format!("{}: no such file or directory", path.to_string_lossy()));
         }
     }
     Ok(())
@@ -193,93 +190,79 @@ pub fn zip_folder<P: AsRef<Path>>(
 ) -> Result<()> {
     let path = path.as_ref();
     if path.is_file() {
-        return Err(anyhow::Error::msg(format!("{:?} is file.", path.as_os_str())));
+        bail!("{:?} is file.", path.as_os_str());
     }
 
     if file_name.is_empty() {
-        return Err(anyhow::Error::msg("file name is empty."));
+        bail!("file name is empty.");
     }
 
-    let file_name = if !file_name.ends_with(".zip") {
-        format!("{}.zip", file_name)
+    let file_name = if file_name.ends_with(".zip") {
+        file_name
     } else {
-        file_name.to_owned()
+        format!("{}.zip", file_name)
     };
 
-    if Path::new(file_name.as_str()).exists() {
-        return Err(anyhow::Error::msg(format!("{} already exist.", file_name)));
+    if Path::new(&file_name).exists() {
+        bail!("{} already exist.", file_name);
     }
 
-    let file = File::create(file_name.as_str())?;
+    let file = File::create(&file_name)?;
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Bzip2).unix_permissions(0o755);
 
-    let folder_path = path.to_string_lossy().to_string();
-    let folder_path = if !folder_path.ends_with("/") {
-        format!("{}/", folder_path)
+    let folder_path = path.to_string_lossy();
+    let folder_prefix = if folder_path.ends_with('/') {
+        folder_path.to_string()
     } else {
-        folder_path
+        format!("{}/", folder_path)
     };
-    let root_dir = file_name.splitn(2, ".").next().unwrap_or("root_dir");
+    let root_dir = file_name.strip_suffix(".zip").unwrap_or(&file_name);
 
     #[cfg(feature = "progress")]
     let pb = {
         let pb = ProgressBar::new(0);
-        pb.set_style(ProgressStyle::with_template("{spinner:.green} {prefix:.blod.green} {wide_msg}").unwrap());
-        pb.set_prefix(format!("compressing..."));
+        pb.set_style(ProgressStyle::with_template("{spinner:.green} {prefix:.bold.green} {wide_msg}").unwrap());
+        pb.set_prefix("compressing...");
         pb
     };
 
-    WalkDir::new(folder_path.as_str()).contents_first(true).into_iter().filter_map(|entry| entry.ok()).any(|entry| {
-        let path = entry.path();
-        let path_string = path.to_string_lossy().as_ref().to_string();
-        let path_in_zip = format!("{}/{}", root_dir, path_string.replace(folder_path.as_str(), ""));
-        if path.is_dir() {
-            if let Ok(read_dir) = fs::read_dir(path) {
-                if read_dir.count() == 0 {
-                    // add empty directory
-                    match zip.add_directory_from_path(path, options) {
-                        Ok(_) => (),
-                        Err(e) => {
-                            println!("add_directory [{}] error: {}", path_string, e);
-                            shutdown.shutdown();
-                        }
-                    }
-                }
-            }
+    for entry in WalkDir::new(path).contents_first(true).into_iter().filter_map(|e| e.ok()) {
+        if shutdown.is_terminated() {
+            break;
         }
-        if path.is_file() {
-            let mut file = File::open(&path).unwrap();
 
+        let entry_path = entry.path();
+        let relative_path = entry_path.to_string_lossy().replace(&folder_prefix, "");
+        let path_in_zip = format!("{}/{}", root_dir, relative_path);
+
+        if entry_path.is_dir() {
+            // Check for empty directory
+            if fs::read_dir(entry_path).map(|mut d| d.next().is_none()).unwrap_or(false) {
+                let dir_path = format!("{}/", path_in_zip);
+                zip.add_directory(&dir_path, options)?;
+            }
+        } else if entry_path.is_file() {
             #[cfg(feature = "progress")]
             {
-                pb.set_message(path_in_zip.to_owned());
+                pb.set_message(path_in_zip.clone());
                 pb.inc(1);
             }
 
-            zip.start_file(path_in_zip, options).unwrap();
-            io::copy(&mut file, &mut zip).unwrap();
+            zip.start_file(&path_in_zip, options)?;
+            let mut file = File::open(entry_path)?;
+            io::copy(&mut file, &mut zip)?;
         }
-        shutdown.is_terminated()
-    });
+    }
 
     #[cfg(feature = "progress")]
     pb.finish_and_clear();
-    zip.finish()?;
 
+    zip.finish()?;
     Ok(())
 }
 
-/// Zip folders, print compress progress if show_progress is true.
-// pub fn zip_folders<P: AsRef<Path>>(folders: &[P]) -> Result<Vec<String>> {
-//     let mut zip_files = vec![];
-//     for path in folders {
-//         zip_files.push(zip_folder(path)?)
-//     }
-//     Ok(zip_files)
-// }
-
-// Unzip given zip file.
+/// Unzip given zip file.
 pub fn unzip<P: AsRef<Path>>(zip_files: &[P]) -> Result<()> {
     for zip_file in zip_files {
         let zip_file_path = zip_file.as_ref();

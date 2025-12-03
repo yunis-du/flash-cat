@@ -4,7 +4,7 @@ use aes_gcm::{
     aead::{Aead, generic_array::GenericArray},
     {Aes256Gcm, KeyInit},
 };
-use anyhow::Result;
+use anyhow::{Result, anyhow, bail};
 use bytes::Bytes;
 use hex::encode_upper;
 use sha2::{Digest, Sha256};
@@ -23,7 +23,7 @@ pub struct Encryptor {
 impl Encryptor {
     pub fn new(share_code: String) -> Result<Self> {
         if share_code.len() != 12 {
-            return Err(anyhow::Error::msg("share code length must be 12".to_string()));
+            bail!("share code length must be 12");
         }
         Ok(Self {
             share_code,
@@ -35,8 +35,7 @@ impl Encryptor {
         &self,
         plaintext: &[u8],
     ) -> Result<Vec<u8>> {
-        let ciphertext =
-            self.cipher.0.encrypt(GenericArray::from_slice(self.share_code.as_bytes()), plaintext).map_err(|op| anyhow::Error::msg(op.to_string()))?;
+        let ciphertext = self.cipher.0.encrypt(GenericArray::from_slice(self.share_code.as_bytes()), plaintext).map_err(|op| anyhow!(op.to_string()))?;
         Ok(ciphertext)
     }
 
@@ -44,8 +43,7 @@ impl Encryptor {
         &self,
         ciphertext: &[u8],
     ) -> Result<Vec<u8>> {
-        let plaintext =
-            self.cipher.0.decrypt(GenericArray::from_slice(self.share_code.as_bytes()), ciphertext).map_err(|op| anyhow::Error::msg(op.to_string()))?;
+        let plaintext = self.cipher.0.decrypt(GenericArray::from_slice(self.share_code.as_bytes()), ciphertext).map_err(|op| anyhow!(op.to_string()))?;
         Ok(plaintext)
     }
 
@@ -79,7 +77,7 @@ impl Debug for CustomAes256Gcm {
 
 #[cfg(test)]
 mod test {
-    use anyhow::Result;
+    use anyhow::{Result, bail};
 
     use crate::utils::gen_share_code;
 
@@ -97,7 +95,7 @@ mod test {
         let encryptor = Encryptor::new(share_code.clone())?;
         let decrypted_text = match encryptor.decrypt(&encrypted_text) {
             Ok(decrypted_text) => decrypted_text,
-            Err(err) => return Err(anyhow::Error::msg(err.to_string())),
+            Err(err) => bail!(err.to_string()),
         };
         println!("Decrypted Text: {:?}", String::from_utf8_lossy(&decrypted_text));
         Ok(())
