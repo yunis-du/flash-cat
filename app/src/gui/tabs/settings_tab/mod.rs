@@ -2,20 +2,19 @@ mod about_widget;
 mod appearance_widget;
 mod general_widget;
 
-use about_widget::{About, Message as AboutMessage};
-use appearance_widget::{Appearance, Message as AppearanceMessage};
-use general_widget::{General, Message as GeneralMessage};
-use iced::{Alignment, Length};
 use iced::{
-    Element, Task,
+    Alignment, Element, Length, Task,
     widget::scrollable::{RelativeOffset, Viewport},
     widget::{column, scrollable},
 };
 
+use super::Tab;
 use crate::gui::assets::icons::GEAR_WIDE_CONNECTED;
 use crate::gui::styles;
 
-use super::Tab;
+use about_widget::{About, Message as AboutMessage};
+use appearance_widget::{Appearance, Message as AppearanceMessage};
+use general_widget::{General, Message as GeneralMessage};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -72,7 +71,6 @@ impl SettingsTab {
             .align_x(Alignment::Center)
             .padding(5),
         )
-        .id(Self::scrollable_id())
         .on_scroll(Message::PageScrolled)
         .direction(styles::scrollable_styles::vertical_direction());
 
@@ -89,10 +87,6 @@ impl Tab for SettingsTab {
 
     fn icon_bytes() -> &'static [u8] {
         GEAR_WIDE_CONNECTED
-    }
-
-    fn get_scrollable_offset(&self) -> scrollable::RelativeOffset {
-        self.scrollable_offset
     }
 }
 

@@ -1,18 +1,33 @@
-use std::sync::Arc;
+use std::{hash::Hash, sync::Arc};
 
-use iced::futures::{SinkExt, Stream, StreamExt};
-use iced::stream::try_channel;
+use iced::{
+    Subscription,
+    futures::{SinkExt, Stream, StreamExt, channel::mpsc},
+    stream::try_channel,
+};
 
 use flash_cat_core::{SenderInteractionMessage, sender::FlashCatSender};
 
 use super::{SENDER_NOTIFICATION, SenderNotification};
 
-pub fn send(fcs: Arc<FlashCatSender>) -> iced::Subscription<Result<(u64, Progress), Error>> {
-    iced::Subscription::run_with_id(0, run(fcs).map(move |progress| progress))
+pub struct FlashCatSenderWrapper(pub Arc<FlashCatSender>);
+
+impl Hash for FlashCatSenderWrapper {
+    fn hash<H: std::hash::Hasher>(
+        &self,
+        state: &mut H,
+    ) {
+        let ptr = Arc::as_ptr(&self.0) as *const ();
+        ptr.hash(state);
+    }
 }
 
-pub fn run(fcs: Arc<FlashCatSender>) -> impl Stream<Item = Result<(u64, Progress), Error>> {
-    try_channel(1, move |mut sender| async move {
+pub fn send(fcs: FlashCatSenderWrapper) -> Subscription<Result<(u64, Progress), Error>> {
+    Subscription::run_with(fcs, |fcs| run(fcs.0.clone()))
+}
+
+fn run(fcs: Arc<FlashCatSender>) -> impl Stream<Item = Result<(u64, Progress), Error>> {
+    try_channel(1, move |mut sender: mpsc::Sender<(u64, Progress)>| async move {
         let mut stream = fcs.start().await.unwrap();
         while let Some(sender_msg) = stream.next().await {
             match sender_msg {

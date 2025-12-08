@@ -1,10 +1,16 @@
-use std::sync::{
-    Arc, LazyLock,
-    atomic::{AtomicU64, Ordering},
+use std::{
+    hash::Hash,
+    sync::{
+        Arc, LazyLock,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
-use iced::futures::{SinkExt, Stream, StreamExt};
-use iced::stream::try_channel;
+use iced::{
+    Subscription,
+    futures::{SinkExt, Stream, StreamExt, channel::mpsc},
+    stream::try_channel,
+};
 
 use flash_cat_core::{ReceiverInteractionMessage, receiver::FlashCatReceiver};
 
@@ -13,12 +19,24 @@ use crate::gui::tabs::receiver_tab::ConfirmType;
 
 pub(super) static RECV_NUM_FILES: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
 
-pub fn recv(fcr: Arc<FlashCatReceiver>) -> iced::Subscription<Result<(u64, Progress), Error>> {
-    iced::Subscription::run_with_id(0, run(fcr).map(move |progress| progress))
+pub struct FlashCatReceiverWrapper(pub Arc<FlashCatReceiver>);
+
+impl Hash for FlashCatReceiverWrapper {
+    fn hash<H: std::hash::Hasher>(
+        &self,
+        state: &mut H,
+    ) {
+        let ptr = Arc::as_ptr(&self.0) as *const ();
+        ptr.hash(state);
+    }
+}
+
+pub fn recv(fcr: FlashCatReceiverWrapper) -> Subscription<Result<(u64, Progress), Error>> {
+    Subscription::run_with(fcr, |fcr| run(fcr.0.clone()))
 }
 
 pub fn run(fcr: Arc<FlashCatReceiver>) -> impl Stream<Item = Result<(u64, Progress), Error>> {
-    try_channel(1, move |mut sender| async move {
+    try_channel(1, move |mut sender: mpsc::Sender<(u64, Progress)>| async move {
         let mut stream = fcr.start().await.unwrap();
         while let Some(receiver_msg) = stream.next().await {
             match receiver_msg {

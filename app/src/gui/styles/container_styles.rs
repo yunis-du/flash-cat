@@ -1,6 +1,4 @@
-use iced::widget::container::Style;
-use iced::{Background, Border};
-use iced::{Color, Theme, color};
+use iced::{Background, Border, Color, Theme, color, widget::container::Style};
 
 use super::theme::FlashCatTheme;
 

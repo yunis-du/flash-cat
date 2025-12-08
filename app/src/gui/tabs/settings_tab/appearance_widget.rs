@@ -51,7 +51,7 @@ impl Appearance {
         }))
         .spacing(5);
 
-        let content = content.push(column!(theme_text, Space::with_width(20), theme_list).padding(5).spacing(5));
+        let content = content.push(column!(theme_text, Space::new().width(20), theme_list).padding(5).spacing(5));
 
         container(content).style(styles::container_styles::first_class_container_rounded_theme).width(Length::Fill).into()
     }

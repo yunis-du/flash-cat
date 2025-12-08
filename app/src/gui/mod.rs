@@ -89,7 +89,7 @@ impl Default for FlashCatApp {
 }
 
 pub mod title_bar {
-    use iced::widget::{Row, container, horizontal_space, mouse_area, row, svg, text};
+    use iced::widget::{Row, container, mouse_area, row, space, svg, text};
     use iced::{Alignment, Length};
 
     use crate::gui::{styles, tabs::TabLabel};
@@ -139,7 +139,9 @@ pub mod title_bar {
 
             let tab_views = Row::with_children(tab_views).spacing(10);
 
-            container(row![horizontal_space(), tab_views, horizontal_space()]).style(styles::container_styles::first_class_container_square_theme).into()
+            container(row![space().width(Length::Fill), tab_views, space().width(Length::Fill)])
+                .style(styles::container_styles::first_class_container_square_theme)
+                .into()
         }
     }
 }

@@ -1,5 +1,7 @@
-use iced::theme::{Custom, Palette};
-use iced::{Color, color};
+use iced::{
+    Color, color,
+    theme::{Custom, Palette},
+};
 
 use super::colors::accent_color;
 
@@ -21,6 +23,7 @@ impl FlashCatTheme {
                     primary: accent_color(),
                     success: Color::from_rgb(0.0, 1.0, 0.0),
                     danger: Color::from_rgb(1.0, 0.0, 0.0),
+                    warning: Color::from_rgb(215.0, 175.0, 0.0),
                 },
             ),
             FlashCatTheme::Dark => Custom::new(
@@ -31,6 +34,7 @@ impl FlashCatTheme {
                     primary: accent_color(),
                     success: Color::from_rgb(0.0, 1.0, 0.0),
                     danger: Color::from_rgb(1.0, 0.0, 0.0),
+                    warning: Color::from_rgb(215.0, 175.0, 0.0),
                 },
             ),
         }

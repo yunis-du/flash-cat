@@ -1,21 +1,19 @@
+mod receiver;
+
 use std::{
     path::Path,
     sync::{Arc, LazyLock, RwLock, atomic::Ordering},
 };
 
 use iced::{
-    Alignment,
+    Alignment, Element, Font, Length, Task, font,
     widget::{
         Column,
-        scrollable::{Id, RelativeOffset, Viewport},
+        scrollable::{RelativeOffset, Viewport},
         tooltip::Position,
     },
+    widget::{button, checkbox, column, container, row, scrollable, space, svg, text, text_input, tooltip},
 };
-use iced::{
-    Element, Font, Length, Task, font,
-    widget::{button, checkbox, column, container, horizontal_space, row, scrollable, svg, text, text_input, tooltip},
-};
-use receiver::{Error, Progress, RECV_NUM_FILES, recv};
 
 use flash_cat_common::{consts::PUBLIC_RELAY, proto::ClientType};
 use flash_cat_core::{ReceiverConfirm, receiver::FlashCatReceiver};
@@ -27,7 +25,7 @@ use crate::gui::{
     styles,
 };
 
-mod receiver;
+use receiver::{Error, FlashCatReceiverWrapper, Progress, RECV_NUM_FILES, recv};
 
 pub(super) static RECEIVER_STATE: LazyLock<RwLock<ReceiverState>> = LazyLock::new(|| RwLock::new(ReceiverState::Idle));
 
@@ -70,7 +68,6 @@ pub enum Message {
 
 pub struct ReceiverTab {
     scrollable_offset: RelativeOffset,
-    scrollable_id: Id,
     share_code: String,
     lan: bool,
     fcr: Option<Arc<FlashCatReceiver>>,
@@ -82,7 +79,6 @@ impl ReceiverTab {
         (
             Self {
                 scrollable_offset: RelativeOffset::START,
-                scrollable_id: Self::scrollable_id(),
                 share_code: String::new(),
                 lan: false,
                 fcr: None,
@@ -97,7 +93,7 @@ impl ReceiverTab {
 
         batch.push(if RECEIVER_STATE.read().unwrap().eq(&ReceiverState::Recving) {
             if self.fcr.is_some() {
-                recv(self.fcr.clone().unwrap()).map(Message::ReceiveProgressed)
+                recv(FlashCatReceiverWrapper(self.fcr.clone().unwrap())).map(Message::ReceiveProgressed)
             } else {
                 iced::Subscription::none()
             }
@@ -227,17 +223,20 @@ impl ReceiverTab {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let share_code_input = row![text("Share Code"), horizontal_space(), text_input("", &self.share_code).on_input(Message::ShareCodeChanged).padding(5),]
-            .spacing(5)
-            .padding(5)
-            .align_y(iced::Alignment::Center);
+        let share_code_input =
+            row![text("Share Code"), space().width(Length::Fill), text_input("", &self.share_code).on_input(Message::ShareCodeChanged).padding(5),]
+                .spacing(5)
+                .padding(5)
+                .align_y(iced::Alignment::Center);
 
         let help_icon = svg(svg::Handle::from_memory(HELP_ICON)).style(styles::svg_styles::colored_svg_theme).height(20).width(20);
 
         let help_tooltip = tooltip(help_icon, "Sender is in the same local area network", Position::FollowCursor).gap(10).style(container::rounded_box);
 
-        let lan_checkbox =
-            row![checkbox("LAN", self.lan).on_toggle(|lan| Message::LanChanged(lan)), help_tooltip,].spacing(5).padding(5).align_y(iced::Alignment::Center);
+        let lan_checkbox = row![checkbox(self.lan).label("LAN").on_toggle(|lan| Message::LanChanged(lan)), help_tooltip,]
+            .spacing(5)
+            .padding(5)
+            .align_y(iced::Alignment::Center);
 
         let receiver_state_read = RECEIVER_STATE.read().unwrap();
 
@@ -247,7 +246,7 @@ impl ReceiverTab {
         };
 
         let mut recv_button = button(row![
-            horizontal_space(),
+            space().width(Length::Fill),
             text(if receiver_state_read.eq(&ReceiverState::Recving) {
                 "Receiving"
             } else if receiver_state_read.eq(&ReceiverState::RecvDone) || errored {
@@ -256,7 +255,7 @@ impl ReceiverTab {
                 "Recv"
             })
             .size(18),
-            horizontal_space()
+            space().width(Length::Fill)
         ])
         .width(Length::Fill);
 
@@ -278,7 +277,7 @@ impl ReceiverTab {
             }
             ReceiverNotification::Confirm(confirm_type, confirm_msg) => row![
                 text(confirm_msg).style(styles::text_styles::accent_color_theme).width(Length::Fixed(350.0)),
-                horizontal_space(),
+                space().width(Length::Fill),
                 button("Yes").on_press(Message::Confirm(confirm_type.clone(), true)),
                 button("No").on_press(Message::Confirm(confirm_type.clone(), false)),
             ]
@@ -299,8 +298,6 @@ impl ReceiverTab {
                             .spacing(5)
                             .width(Length::Fill)
                     )
-                    .id(self.scrollable_id.clone())
-                    .on_scroll(Message::PageScrolled)
                     .height(300)
                     .direction(styles::scrollable_styles::vertical_direction())
                 )
@@ -346,9 +343,5 @@ impl Tab for ReceiverTab {
 
     fn icon_bytes() -> &'static [u8] {
         RECEIVER_ICON
-    }
-
-    fn get_scrollable_offset(&self) -> scrollable::RelativeOffset {
-        self.scrollable_offset
     }
 }

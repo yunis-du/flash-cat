@@ -1,10 +1,10 @@
-use iced::widget::{button, column, container, mouse_area, row, svg, text};
-use iced::{Element, Length, Task, mouse};
-use iced_aw::{grid, grid_row};
+use iced::{
+    Element, Length, Task, mouse,
+    widget::{button, column, container, grid, mouse_area, row, svg, text},
+};
 use log::error;
 
-use crate::gui::assets::icons::GITHUB_ICON;
-use crate::gui::styles;
+use crate::gui::{assets::icons::GITHUB_ICON, styles};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -43,20 +43,17 @@ fn info_widget() -> Element<'static, Message> {
         .on_press(Message::Repository);
 
     let mut grid = grid![
-        grid_row![text("Author"), text(built_info::PKG_AUTHORS)],
-        grid_row![text("Version"), text(built_info::PKG_VERSION)],
-        grid_row![text("License"), text(built_info::PKG_LICENSE)],
-        grid_row![text("Repository"), repository],
+        row![text("Author"), text(built_info::PKG_AUTHORS)],
+        row![text("Version"), text(built_info::PKG_VERSION)],
+        row![text("License"), text(built_info::PKG_LICENSE)],
+        row![text("Repository"), repository],
     ];
 
     if let Some(commit_hash) = built_info::GIT_COMMIT_HASH {
-        grid = grid.push(grid_row![text("Commit Hash"), text(commit_hash)]);
+        grid = grid.push(row![text("Commit Hash"), text(commit_hash)]);
     }
 
-    grid = grid.push(grid_row![
-        text("Build Time                  "),
-        text(built_info::BUILT_TIME_UTC)
-    ]);
+    grid = grid.push(row![text("Build Time                  "), text(built_info::BUILT_TIME_UTC)]);
 
     grid.into()
 }

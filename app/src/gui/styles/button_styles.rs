@@ -1,6 +1,8 @@
-use iced::theme::{Theme, palette};
-use iced::widget::button::{Status, Style};
-use iced::{Background, Border};
+use iced::{
+    Background, Border,
+    theme::{Theme, palette},
+    widget::button::{Status, Style},
+};
 
 /// A custom theme that makes button transparent
 pub fn transparent_button_theme(

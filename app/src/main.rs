@@ -8,7 +8,7 @@ use flash_cat_app::gui::{FlashCatApp, assets};
 fn main() -> Result<()> {
     let icon = window::icon::from_file_data(assets::logos::ICON_LOGO, None).ok();
 
-    iced::application(FlashCatApp::title, FlashCatApp::update, FlashCatApp::view)
+    iced::application(FlashCatApp::default, FlashCatApp::update, FlashCatApp::view)
         .subscription(FlashCatApp::subscription)
         .theme(FlashCatApp::theme)
         .window(iced::window::Settings {

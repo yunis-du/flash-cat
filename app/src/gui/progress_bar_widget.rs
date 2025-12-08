@@ -1,6 +1,6 @@
 use iced::{
-    Element,
-    widget::{column, horizontal_space, progress_bar, row, text},
+    Element, Length,
+    widget::{column, progress_bar, row, space, text},
 };
 
 use flash_cat_common::utils::{human_bytes, human_duration};
@@ -94,7 +94,7 @@ impl ProgressBar {
         };
 
         if self.state.eq(&State::Skip) {
-            row![text(self.file_name.as_str()).style(styles::text_styles::accent_color_theme), horizontal_space(), text("Skip")]
+            row![text(self.file_name.as_str()).style(styles::text_styles::accent_color_theme), space().width(Length::Fill), text("Skip")]
                 .spacing(3)
                 .align_y(iced::Alignment::Center)
                 .into()
@@ -103,8 +103,8 @@ impl ProgressBar {
             column![
                 text(self.file_name.as_str()).style(styles::text_styles::accent_color_theme),
                 row![
-                    progress_bar(0.0..=self.file_size as f32, current_progress).height(12).width(200),
-                    horizontal_space(),
+                    progress_bar(0.0..=self.file_size as f32, current_progress).girth(12).length(200),
+                    space().width(Length::Fill),
                     text(format!(
                         "{}/{} ({}/s, {}) {}/{}",
                         human_bytes(current_progress as u64),

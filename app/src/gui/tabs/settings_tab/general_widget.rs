@@ -1,11 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use iced::widget::{button, column, container, horizontal_space, mouse_area, row, text, text_input};
-use iced::{Element, Task, mouse};
+use iced::{
+    Element, Length, Task, mouse,
+    widget::{button, column, container, mouse_area, row, space, text, text_input},
+};
 
 use super::settings_config::SETTINGS;
-use crate::folder::pick_floder;
-use crate::gui::styles;
+use crate::{folder::pick_floder, gui::styles};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -73,7 +74,7 @@ impl General {
                 text("Flash-Cat relay address"),
                 row![
                     text_input("relay address", &self.relay_addr).on_input(Message::RelayAddrChanged).on_submit(Message::RelayAddrSubimt).padding(5),
-                    horizontal_space(),
+                    space().width(Length::Fill),
                     button("Modify").on_press(Message::RelayAddrSubimt),
                 ]
             ],
@@ -90,7 +91,7 @@ impl General {
                     mouse_area(text(current_download_path.clone()).style(styles::text_styles::accent_color_theme),)
                         .interaction(mouse::Interaction::Pointer)
                         .on_press(Message::OpenDownloadPath(current_download_path.clone())),
-                    horizontal_space(),
+                    space().width(Length::Fill),
                     button("Modify").on_press(Message::ModifySavePath),
                 ]
             ],
