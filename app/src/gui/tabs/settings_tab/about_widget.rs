@@ -43,17 +43,23 @@ fn info_widget() -> Element<'static, Message> {
         .on_press(Message::Repository);
 
     let mut grid = grid![
-        row![text("Author"), text(built_info::PKG_AUTHORS)],
-        row![text("Version"), text(built_info::PKG_VERSION)],
-        row![text("License"), text(built_info::PKG_LICENSE)],
-        row![text("Repository"), repository],
-    ];
+        // author
+        row![text("Author").width(120), text(built_info::PKG_AUTHORS)],
+        // version
+        row![text("Version").width(120), text(built_info::PKG_VERSION)],
+        // license
+        row![text("License").width(120), text(built_info::PKG_LICENSE)],
+        // repository
+        row![text("Repository").width(120), repository],
+    ]
+    .height(grid::Sizing::EvenlyDistribute(Length::Shrink))
+    .columns(1);
 
     if let Some(commit_hash) = built_info::GIT_COMMIT_HASH {
-        grid = grid.push(row![text("Commit Hash"), text(commit_hash)]);
+        grid = grid.push(row![text("Commit Hash").width(120), text(commit_hash)]);
     }
 
-    grid = grid.push(row![text("Build Time                  "), text(built_info::BUILT_TIME_UTC)]);
+    grid = grid.push(row![text("Build Time").width(120), text(built_info::BUILT_TIME_UTC)]);
 
     grid.into()
 }
