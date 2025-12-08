@@ -211,12 +211,6 @@ pub fn zip_folder<P: AsRef<Path>>(
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Bzip2).unix_permissions(0o755);
 
-    let folder_path = path.to_string_lossy();
-    let folder_prefix = if folder_path.ends_with('/') {
-        folder_path.to_string()
-    } else {
-        format!("{}/", folder_path)
-    };
     let root_dir = file_name.strip_suffix(".zip").unwrap_or(&file_name);
 
     #[cfg(feature = "progress")]
@@ -270,7 +264,7 @@ pub fn zip_folder<P: AsRef<Path>>(
         }
 
         let entry_path = entry.path();
-        let relative_path = entry_path.to_string_lossy().replace(&folder_prefix, "");
+        let relative_path = entry_path.strip_prefix(path).unwrap_or(entry_path).to_string_lossy();
         let path_in_zip = format!("{}/{}", root_dir, relative_path);
 
         if entry_path.is_dir() {
