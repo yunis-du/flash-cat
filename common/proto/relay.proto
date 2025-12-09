@@ -14,48 +14,48 @@ service RelayService {
 
 // Request to open an relay session.
 message JoinRequest {
-  Id id = 1;  // Join-created id info.
-  ClientType client_type = 2; // Client type.
-  RelayInfo sender_local_relay = 3; // Local relay info for sender.
+  Id id = 1;// Join-created id info.
+  ClientType client_type = 2;// Client type.
+  RelayInfo sender_local_relay = 3;// Local relay info for sender.
 }
 
 // Details of relay session.
 message JoinResponse {
   oneof join_response_message {
-    JoinSuccess success = 1;  // Join relay session success.
-    JoinFailed failed = 2;    // Join relay session failed.
+    JoinSuccess success = 1;// Join relay session success.
+    JoinFailed failed = 2;// Join relay session failed.
   }
 }
 
 // Join success.
 message JoinSuccess {
-  RelayInfo relay = 1;  // Relay info.
-  RelayInfo sender_local_relay = 2; // Local relay info for sender.
-  string client_latest_version = 3; // Latest client version.
+  RelayInfo relay = 1;// Relay info.
+  RelayInfo sender_local_relay = 2;// Local relay info for sender.
+  string client_latest_version = 3;// Latest client version.
 }
 
 // Join failed.
 message JoinFailed {
-  string error_msg = 1; // Join failed message.
+  string error_msg = 1;// Join failed message.
 }
 
 message RelayInfo {
-  string relay_ip = 1;  // Ip address of relay.
-  uint32 relay_port = 2;  // Port of relay.
+  string relay_ip = 1;// Ip address of relay.
+  uint32 relay_port = 2;// Port of relay.
 }
 
 // Request to stop a relay session gracefully.
 message CloseRequest {
-  bytes encrypted_share_code = 1;  // Encrypted share code.
+  bytes encrypted_share_code = 1;// Encrypted share code.
 }
 
 // Server response to closing a session.
 message CloseResponse {}
 
 // Bidirectional streaming update from the relay server.
-message RelayUpdate{
+message RelayUpdate {
   oneof relay_message {
-    Id join = 1;           // First stream message: join session.
+    Id join = 1;// First stream message: join session.
     Joined joined = 2;
     Ready ready = 3;
     SenderUpdate sender = 4;
@@ -70,27 +70,29 @@ message RelayUpdate{
 
 // Join to the ID of the relay session.
 message Id {
-  bytes encrypted_share_code = 1;  // Encrypted share code.
-  Character character = 2;         // Character.
+  bytes encrypted_share_code = 1;// Encrypted share code.
+  Character character = 2;// Character.
 }
 
 // Client type.
 enum ClientType {
-  Cli = 0; // CLI client.
-  App = 1; // App client.
+  CLI = 0;// CLI client.
+  APP = 1;// App client.
 }
 
 // Character of the client.
 enum Character {
-  Sender = 0;     // Character of sharer.
-  Receiver = 1;   // Character of recipient.
+  SENDER = 0;// Character of sharer.
+  RECEIVER = 1;// Character of recipient.
 }
 
 // Joined.
 message Joined {}
 
 // Ready.
-message Ready {}
+message Ready {
+  bool local_relay = 1;// Whether is local relay.
+}
 
 // Done.
 message Done {}
@@ -101,86 +103,86 @@ message Terminated {}
 // Sender update.
 message SenderUpdate {
   oneof sender_message {
-    SendRequest send_request = 1; // Send request.
-    NewFileRequest new_file_request = 2; // New file request.
-    BreakPoint break_point = 3; // Break point.
-    FileData file_data = 4; // File data.
-    FileDone file_done = 5; // File done.
+    SendRequest send_request = 1;// Send request.
+    NewFileRequest new_file_request = 2;// New file request.
+    BreakPoint break_point = 3;// Break point.
+    FileData file_data = 4;// File data.
+    FileDone file_done = 5;// File done.
   }
 }
 
 // Send request.
 message SendRequest {
-  uint64 total_size = 1; // Total size.
-  uint64 num_files = 2; // Number of files.
-  uint64 num_folders = 3; // Number of folders.
-  uint64 max_file_name_length = 4; // Maximum file name length.
+  uint64 total_size = 1;// Total size.
+  uint64 num_files = 2;// Number of files.
+  uint64 num_folders = 3;// Number of folders.
+  uint64 max_file_name_length = 4;// Maximum file name length.
 }
 
 // New file request.
 message NewFileRequest {
-  uint64 file_id = 1; // File id.
-  string filename = 2; // File name.
-  uint32 file_mode = 3; // File mode.
-  string relative_path = 4; // Relative path.
-  uint64 total_size = 5; // Total size.
-  bool is_empty_dir = 6; // Whether it is an empty directory.
+  uint64 file_id = 1;// File id.
+  string filename = 2;// File name.
+  uint32 file_mode = 3;// File mode.
+  string relative_path = 4;// Relative path.
+  uint64 total_size = 5;// Total size.
+  bool is_empty_dir = 6;// Whether it is an empty directory.
 }
 
 // Break point.
 message BreakPoint {
-  uint64 file_id = 1; // File id.
-  uint64 position = 2; // Position.
+  uint64 file_id = 1;// File id.
+  uint64 position = 2;// Position.
 }
 
 // File data.
 message FileData {
-  uint64 file_id = 1; // File id.
-  bytes data = 2; // File data.
+  uint64 file_id = 1;// File id.
+  bytes data = 2;// File data.
 }
 
 // File done.
 message FileDone {
-  uint64 file_id = 1; // File id.
+  uint64 file_id = 1;// File id.
 }
 
 // Receiver update.
 message ReceiverUpdate {
   oneof receiver_message {
-    Confirm share_confirm = 1; // Share confirm.
-    FileConfirm file_confirm = 2; // File confirm.
+    Confirm share_confirm = 1;// Share confirm.
+    FileConfirm file_confirm = 2;// File confirm.
   }
 }
 
 // File confirm.
 message FileConfirm {
   oneof confirm_message {
-    NewFileConfirm new_file_confirm = 1; // New file confirm.
-    BreakPointConfirm break_point_confirm = 2; // Break point confirm.
+    NewFileConfirm new_file_confirm = 1;// New file confirm.
+    BreakPointConfirm break_point_confirm = 2;// Break point confirm.
   }
 }
 
 // New file confirm.
 message NewFileConfirm {
-  uint64 file_id = 1; // File id.
-  Confirm confirm = 2; // Confirm.
+  uint64 file_id = 1;// File id.
+  Confirm confirm = 2;// Confirm.
 }
 
 // Break point confirm.
 message BreakPointConfirm {
-  uint64 file_id = 1; // File id.
-  uint64 position = 2; // Position.
-  Confirm confirm = 3; // Confirm.
+  uint64 file_id = 1;// File id.
+  uint64 position = 2;// Position.
+  Confirm confirm = 3;// Confirm.
 }
 
 // Confirm.
 enum Confirm {
-  Accept = 0; // Accept.
-  Reject = 1; // Reject.
+  ACCEPT = 0;// Accept.
+  REJECT = 1;// Reject.
 }
 
 // File result.
 message FileResult {
-  int32 file_id = 1; // File id.
-  int32 status = 2; // The status of file transfer, 0 is success other is failed.
+  int32 file_id = 1;// File id.
+  int32 status = 2;// The status of file transfer, 0 is success other is failed.
 }

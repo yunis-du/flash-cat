@@ -93,9 +93,10 @@ impl Send {
                         self.shutdown();
                     }
                     SenderInteractionMessage::RelayFailed((relay_type, error)) => {
-                        println!("connect to {} relay failed: {}", relay_type.to_string(), error);
                         if RelayType::Local.eq(&relay_type) || RelayType::Specify.eq(&relay_type) {
                             process::exit(1);
+                        } else {
+                            println!("connect to {} relay failed: {}", relay_type.to_string(), error);
                         }
                     }
                     SenderInteractionMessage::ContinueFile(file_id) => {
@@ -112,7 +113,7 @@ impl Send {
                         self.shutdown();
                     }
                     SenderInteractionMessage::SendDone => {
-                        print!("Send files done. Waiting for the receiver to receive finish...");
+                        print!("Send files done. don't close this window, waiting for the receiver to receive finish...");
                         stdout().flush()?;
                     }
                     SenderInteractionMessage::Completed => {

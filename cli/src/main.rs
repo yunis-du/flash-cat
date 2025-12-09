@@ -219,7 +219,7 @@ async fn start_relay(
     #[cfg(windows)]
     let sigint = ctrl_c();
 
-    let relay = Relay::new(external_ip)?;
+    let relay = Relay::new(external_ip, false)?;
 
     let relay_task = async {
         info!("relay listening at {addr}");

@@ -7,33 +7,40 @@ use std::{
 use anyhow::Result;
 use dashmap::DashMap;
 use flash_cat_common::Shutdown;
-use log::{debug, error};
+use log::debug;
 use tokio::time;
 
 use crate::{listen, session::Session};
 
+/// Session timeout.
 const DISCONNECTED_SESSION_EXPIRY: Duration = Duration::from_secs(300);
 
-#[derive(Clone, Debug, Default)]
-pub struct RelayOptions {}
-
+/// Relay state.
 pub struct RelayState {
     external_ip: Option<IpAddr>,
     store: DashMap<String, Arc<Session>>,
+    local_relay: bool,
 }
 
 impl RelayState {
-    pub fn new(external_ip: Option<IpAddr>) -> Result<Self> {
+    /// Create a new relay state.
+    pub fn new(
+        external_ip: Option<IpAddr>,
+        local_relay: bool,
+    ) -> Result<Self> {
         Ok(Self {
             store: DashMap::new(),
             external_ip,
+            local_relay,
         })
     }
 
+    /// External IP address.
     pub fn external_ip(&self) -> Option<IpAddr> {
         self.external_ip
     }
 
+    /// Lookup session by name.
     pub fn lookup(
         &self,
         name: &str,
@@ -41,6 +48,7 @@ impl RelayState {
         self.store.get(name).map(|s| s.clone())
     }
 
+    /// Close old sessions.
     pub async fn close_old_sessions(&self) {
         loop {
             debug!("start check old sessions");
@@ -53,33 +61,23 @@ impl RelayState {
                 }
             }
             for name in to_close {
-                if let Err(err) = self.close_session(&name).await {
-                    error!("failed to close old session {name}, {err}");
-                }
+                self.close_session(&name);
                 debug!("closeed old session {name}");
             }
         }
     }
 
-    pub fn remove(
+    /// Close session and remove it from store.
+    pub fn close_session(
         &self,
         name: &str,
-    ) -> bool {
+    ) {
         if let Some((_, session)) = self.store.remove(name) {
             session.shutdown();
-            true
-        } else {
-            false
         }
     }
-    pub async fn close_session(
-        &self,
-        name: &str,
-    ) -> Result<()> {
-        self.remove(name);
-        Ok(())
-    }
 
+    /// Insert session into store.
     pub fn insert(
         &self,
         name: &str,
@@ -90,6 +88,12 @@ impl RelayState {
         }
     }
 
+    /// Whether is local relay.
+    pub fn is_local_relay(&self) -> bool {
+        self.local_relay
+    }
+
+    /// Shutdown all sessions.
     pub fn shutdown(&self) {
         for entry in &self.store {
             entry.value().shutdown();
@@ -97,29 +101,38 @@ impl RelayState {
     }
 }
 
+/// Relay server.
 pub struct Relay {
     state: Arc<RelayState>,
+
     shutdown: Shutdown,
 }
 
 impl Relay {
-    pub fn new(external_ip: Option<IpAddr>) -> Result<Self> {
+    /// Create a new relay server.
+    pub fn new(
+        external_ip: Option<IpAddr>,
+        local_relay: bool,
+    ) -> Result<Self> {
         Ok(Self {
-            state: Arc::new(RelayState::new(external_ip)?),
+            state: Arc::new(RelayState::new(external_ip, local_relay)?),
             shutdown: Shutdown::new(),
         })
     }
 
+    /// Create a new relay server with shutdown.
     pub fn new_with_shutdown(
         external_ip: Option<IpAddr>,
+        local_relay: bool,
         shutdown: Shutdown,
     ) -> Result<Self> {
         Ok(Self {
-            state: Arc::new(RelayState::new(external_ip)?),
+            state: Arc::new(RelayState::new(external_ip, local_relay)?),
             shutdown,
         })
     }
 
+    /// Relay state.
     pub fn state(&self) -> Arc<RelayState> {
         Arc::clone(&self.state)
     }

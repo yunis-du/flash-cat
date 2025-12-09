@@ -145,7 +145,12 @@ impl RelayService for GrpcServer {
 
         if let Character::Receiver = character {
             // readly to interaction
-            if let Err(e) = session.broadcast(RelayMessage::Ready(Ready {})).await {
+            if let Err(e) = session
+                .broadcast(RelayMessage::Ready(Ready {
+                    local_relay: self.0.is_local_relay(),
+                }))
+                .await
+            {
                 error!("broadcast failed: {e}");
             }
             info!("receiver(addr: {remote_addr}, session_id: {}) started channel", session.id());
@@ -178,10 +183,8 @@ impl RelayService for GrpcServer {
         }
         // wait for broadcast message send to end
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if let Err(err) = self.0.close_session(&session_code).await {
-            error!("failed to close session, error: {}", err);
-            return Err(Status::internal(err.to_string()));
-        }
+        self.0.close_session(&session_code);
+
         Ok(Response::new(CloseResponse {}))
     }
 }

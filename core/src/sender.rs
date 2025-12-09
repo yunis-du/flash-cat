@@ -115,7 +115,7 @@ impl FlashCatSender {
                 endpoint,
                 sender_stream_tx.clone(),
                 self.shutdown.clone(),
-                None,
+                self.local_relay_shutdown.clone(),
             )
             .await?;
         } else {
@@ -138,8 +138,8 @@ impl FlashCatSender {
                 None,
                 endpoint,
                 sender_stream_tx.clone(),
+                self.public_relay_shutdown.clone(),
                 self.local_relay_shutdown.clone(),
-                None,
             )
             .await?;
 
@@ -151,7 +151,7 @@ impl FlashCatSender {
                 endpoint,
                 sender_stream_tx.clone(),
                 self.public_relay_shutdown.clone(),
-                Some(self.local_relay_shutdown.clone()),
+                self.local_relay_shutdown.clone(),
             )
             .await?;
 
@@ -179,7 +179,7 @@ impl FlashCatSender {
         local_relay_shutdown: Shutdown,
     ) {
         tokio::spawn(async move {
-            let relay = match Relay::new(None) {
+            let relay = match Relay::new(None, true) {
                 Ok(relay) => relay,
                 Err(e) => {
                     let _ = &sender_stream_tx
@@ -229,8 +229,8 @@ impl FlashCatSender {
         local_relay_port: Option<u16>,
         mut endpoint: Endpoint,
         sender_stream_tx: mpsc::Sender<SenderInteractionMessage>,
-        shutdown: Shutdown,
-        local_relay_shutdown: Option<Shutdown>,
+        public_or_specify_shutdown: Shutdown,
+        local_relay_shutdown: Shutdown,
     ) -> Result<()> {
         let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
 
@@ -319,7 +319,7 @@ impl FlashCatSender {
                 file_collector.clone(),
                 endpoint,
                 &sender_stream_tx,
-                shutdown,
+                public_or_specify_shutdown,
                 local_relay_shutdown,
             )
             .await
@@ -340,8 +340,8 @@ impl FlashCatSender {
         file_collector: Arc<FileCollector>,
         endpoint: Endpoint,
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
-        shutdown: Shutdown,
-        local_relay_shutdown: Option<Shutdown>,
+        public_or_specify_shutdown: Shutdown,
+        local_relay_shutdown: Shutdown,
     ) -> Result<()> {
         let mut client = RelayServiceClient::connect(endpoint).await?;
 
@@ -360,6 +360,11 @@ impl FlashCatSender {
         let mut messages = resp.into_inner(); // A stream of relay messages.
 
         let (confirm_tx, confirm_rx) = async_channel::bounded(10);
+
+        let shutdown = match relay_type {
+            RelayType::Local => local_relay_shutdown.clone(),
+            _ => public_or_specify_shutdown.clone(),
+        };
 
         loop {
             let message = tokio::select! {
@@ -386,11 +391,13 @@ impl FlashCatSender {
                     .await?;
                 }
                 RelayMessage::Joined(_) => (),
-                RelayMessage::Ready(_) => {
-                    if relay_type == RelayType::Public {
-                        if let Some(shutdown) = &local_relay_shutdown {
-                            shutdown.shutdown();
-                        }
+                RelayMessage::Ready(ready) => {
+                    if ready.local_relay {
+                        // close public relay
+                        public_or_specify_shutdown.shutdown();
+                    } else {
+                        // close local relay
+                        local_relay_shutdown.shutdown();
                     }
                     Self::send_msg_to_relay(
                         &tx,
