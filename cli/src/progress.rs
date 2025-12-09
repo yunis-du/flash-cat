@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::HashMap, fmt::Write};
 
-use indicatif::{ProgressBar, ProgressState, ProgressStyle};
+use indicatif::{HumanDuration, ProgressBar, ProgressState, ProgressStyle};
 
 pub struct Progress {
     num_files: u64,
@@ -39,12 +39,14 @@ impl Progress {
         let serial_number = format!("{file_id}/{}", self.num_files);
         let progress_bar = ProgressBar::new(total_size).with_prefix(file_name).with_message(serial_number);
         progress_bar.set_style(
-            ProgressStyle::with_template("{spinner:.green} {prefix:.bold.green} [{bar:50.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta}) {msg}")
-                .unwrap()
-                .with_key("eta", |state: &ProgressState, w: &mut dyn Write| {
-                    write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap()
-                })
-                .progress_chars("#>-"),
+            ProgressStyle::with_template(
+                "{spinner:.green} {prefix:.bold.green} [{bar:50.cyan/blue}] {bytes}/{total_bytes} • {bytes_per_sec} • ETA {eta} {msg}",
+            )
+            .unwrap()
+            .with_key("eta", |state: &ProgressState, w: &mut dyn Write| {
+                write!(w, "{:#}", HumanDuration(state.eta())).unwrap()
+            })
+            .progress_chars("#>-"),
         );
 
         self.progress_bar_map.insert(file_id, progress_bar);
