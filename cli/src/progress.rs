@@ -1,6 +1,8 @@
 use std::{borrow::Cow, collections::HashMap, fmt::Write};
 
-use indicatif::{HumanDuration, ProgressBar, ProgressState, ProgressStyle};
+use indicatif::{ProgressBar, ProgressState, ProgressStyle};
+
+use flash_cat_common::format::HumanDuration;
 
 pub struct Progress {
     num_files: u64,
@@ -58,6 +60,9 @@ impl Progress {
         pos: u64,
     ) {
         if let Some(progress_bar) = self.progress_bar_map.get(&file_id) {
+            if progress_bar.position() == 0 {
+                progress_bar.reset();
+            }
             progress_bar.set_position(pos);
         }
     }
@@ -67,6 +72,14 @@ impl Progress {
         file_id: u64,
     ) {
         if let Some(progress_bar) = self.progress_bar_map.get(&file_id) {
+            progress_bar.set_style(
+                ProgressStyle::with_template("{spinner:.green} {prefix:.bold.green} [{bar:50.cyan/blue}] {bytes} • in {elapsed} {msg}")
+                    .unwrap()
+                    .with_key("elapsed", |state: &ProgressState, w: &mut dyn Write| {
+                        write!(w, "{:#}", HumanDuration(state.elapsed())).unwrap()
+                    })
+                    .progress_chars("#>-"),
+            );
             progress_bar.finish();
         }
     }
