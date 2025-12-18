@@ -10,6 +10,7 @@ use tokio::sync::Notify;
 
 pub mod consts;
 pub mod crypt;
+pub mod format;
 mod logger;
 pub mod utils;
 mod version;
