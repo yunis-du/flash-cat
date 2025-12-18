@@ -17,6 +17,7 @@ pub mod styles;
 pub mod tabs;
 
 pub struct FlashCatApp {
+    logo: image::Handle,
     active_tab: TabId,
     title_bar: TitleBar,
     tabs_controller: TabsController,
@@ -58,7 +59,7 @@ impl FlashCatApp {
 
     pub fn view(&self) -> Element<'_, Message> {
         column![
-            logo_widget(),
+            self.logo_widget(),
             self.title_bar.view(&self.tabs_controller.get_labels()).map(Message::TitleBar),
             self.tabs_controller.view().map(Message::TabsController)
         ]
@@ -75,12 +76,27 @@ impl FlashCatApp {
         );
         iced::Theme::Custom(custom_theme)
     }
+
+    fn logo_widget(&self) -> Element<'_, Message> {
+        let logo_image = image(self.logo.clone()).height(65.0);
+
+        let logo_text = text("Flash Cat")
+            .size(20)
+            .font(Font {
+                weight: Weight::Bold,
+                ..Default::default()
+            })
+            .style(styles::text_styles::brown_text_theme);
+
+        container(row![logo_image, logo_text].align_y(iced::Alignment::Center).spacing(10)).width(Length::Fill).center_x(Length::Fill).into()
+    }
 }
 
 impl Default for FlashCatApp {
     fn default() -> Self {
         let (tabs_controller, _) = TabsController::new();
         Self {
+            logo: image::Handle::from_bytes(assets::logos::IMG_LOGO),
             active_tab: TabId::Sender,
             title_bar: TitleBar::new(),
             tabs_controller,
@@ -144,20 +160,4 @@ pub mod title_bar {
                 .into()
         }
     }
-}
-
-fn logo_widget() -> Element<'static, Message> {
-    let logo_image = image(image::Handle::from_bytes(assets::logos::IMG_LOGO)).height(65.0);
-    let logo_text = text("Flash Cat")
-        .size(20)
-        .font(Font {
-            weight: Weight::Bold,
-            ..Default::default()
-        })
-        .style(styles::text_styles::brown_text_theme);
-    container(row![logo_image, logo_text].align_y(iced::Alignment::Center).spacing(10))
-        .width(Length::Fill)
-        .center_x(Length::Fill)
-        // .center_y(Length::Fill)
-        .into()
 }
