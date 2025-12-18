@@ -11,7 +11,7 @@ use std::{
 
 use iced::{
     Alignment, Element, Font, Length, Padding, Task, font, mouse,
-    widget::{Column, Scrollable, button, column, container, mouse_area, operation::RelativeOffset, row, scrollable::Viewport, space, svg, text},
+    widget::{Column, Id, Scrollable, button, column, container, mouse_area, operation::RelativeOffset, row, scrollable::Viewport, space, svg, text},
 };
 
 use flash_cat_common::{
@@ -81,6 +81,7 @@ pub enum Message {
 
 pub struct SenderTab {
     scrollable_offset: RelativeOffset,
+    scrollable_id: Id,
     share_code: String,
     send_button_text: String,
     paths: Vec<String>,
@@ -95,6 +96,7 @@ impl SenderTab {
         (
             Self {
                 scrollable_offset: RelativeOffset::START,
+                scrollable_id: Self::scrollable_id(),
                 share_code: String::new(),
                 send_button_text: String::new(),
                 paths: vec![],
@@ -426,6 +428,8 @@ impl SenderTab {
                         .spacing(5)
                         .width(Length::Fill)
                 })
+                .id(self.scrollable_id.clone())
+                .on_scroll(Message::PageScrolled)
                 .height(300)
                 .direction(styles::scrollable_styles::vertical_direction()),
             )
@@ -499,6 +503,10 @@ impl Tab for SenderTab {
 
     fn icon_bytes() -> &'static [u8] {
         SENDER_ICON
+    }
+
+    fn get_scrollable_offset(&self) -> RelativeOffset {
+        self.scrollable_offset
     }
 }
 

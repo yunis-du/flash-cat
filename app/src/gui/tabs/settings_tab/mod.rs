@@ -4,8 +4,10 @@ mod general_widget;
 
 use iced::{
     Alignment, Element, Length, Task,
-    widget::scrollable::{RelativeOffset, Viewport},
-    widget::{column, scrollable},
+    widget::{
+        Id, Scrollable, column,
+        scrollable::{RelativeOffset, Viewport},
+    },
 };
 
 use super::Tab;
@@ -25,10 +27,11 @@ pub enum Message {
 }
 
 pub struct SettingsTab {
+    scrollable_offset: RelativeOffset,
+    scrollable_id: Id,
     appearance_settings: Appearance,
     general_settings: General,
     about: About,
-    scrollable_offset: RelativeOffset,
 }
 
 impl SettingsTab {
@@ -36,10 +39,11 @@ impl SettingsTab {
         let (about_widget, about_task) = About::new();
         (
             Self {
+                scrollable_offset: RelativeOffset::START,
+                scrollable_id: Self::scrollable_id(),
                 appearance_settings: Appearance,
                 general_settings: General::new(),
                 about: about_widget,
-                scrollable_offset: RelativeOffset::START,
             },
             about_task.map(Message::About),
         )
@@ -60,7 +64,7 @@ impl SettingsTab {
         }
     }
     pub fn view(&self) -> Element<'_, Message> {
-        let settings_body = scrollable(
+        let settings_body = Scrollable::new(
             column![
                 self.appearance_settings.view().map(Message::Appearance),
                 self.general_settings.view().map(Message::General),
@@ -71,6 +75,7 @@ impl SettingsTab {
             .align_x(Alignment::Center)
             .padding(5),
         )
+        .id(self.scrollable_id.clone())
         .on_scroll(Message::PageScrolled)
         .direction(styles::scrollable_styles::vertical_direction());
 
@@ -87,6 +92,10 @@ impl Tab for SettingsTab {
 
     fn icon_bytes() -> &'static [u8] {
         GEAR_WIDE_CONNECTED
+    }
+
+    fn get_scrollable_offset(&self) -> RelativeOffset {
+        self.scrollable_offset
     }
 }
 

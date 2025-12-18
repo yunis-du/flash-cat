@@ -2,7 +2,10 @@ pub mod receiver_tab;
 pub mod sender_tab;
 pub mod settings_tab;
 
-use iced::{Element, Task};
+use iced::{
+    Element, Task,
+    widget::{Id, operation, scrollable::RelativeOffset},
+};
 
 use receiver_tab::{Message as ReceiverMessage, ReceiverTab};
 use sender_tab::{Message as SenderMessage, SenderTab};
@@ -17,6 +20,19 @@ pub trait Tab {
 
     fn tab_label() -> TabLabel {
         TabLabel::new(Self::title(), Self::icon_bytes())
+    }
+
+    fn get_scrollable_offset(&self) -> RelativeOffset;
+
+    fn set_scrollable_offset(scrollable_offset: RelativeOffset) -> Task<Self::Message>
+    where
+        Self::Message: 'static,
+    {
+        operation::snap_to(Self::scrollable_id(), scrollable_offset)
+    }
+
+    fn scrollable_id() -> Id {
+        Id::new(Self::title())
     }
 }
 
@@ -92,6 +108,7 @@ pub struct TabsController {
     sender_tab: SenderTab,
     receiver_tab: ReceiverTab,
     settings_tab: SettingsTab,
+    tabs_scrollable_offsets: [RelativeOffset; 3],
 }
 
 impl TabsController {
@@ -106,17 +123,55 @@ impl TabsController {
                 sender_tab,
                 receiver_tab,
                 settings_tab,
+                tabs_scrollable_offsets: [RelativeOffset::START; 3],
             },
             Task::batch([sender_task.map(Message::Sender), receiver_task.map(Message::Receiver), settings_task.map(Message::Settings)]),
         )
+    }
+
+    fn record_scrollable_offset(
+        &mut self,
+        index: usize,
+        scrollable_offset: RelativeOffset,
+    ) {
+        self.tabs_scrollable_offsets[index] = scrollable_offset;
+    }
+
+    fn record_tabs_scrollable_offsets(&mut self) {
+        let index: usize = self.current_tab.into();
+
+        match self.current_tab {
+            TabId::Sender => self.record_scrollable_offset(index, self.sender_tab.get_scrollable_offset()),
+            TabId::Receiver => self.record_scrollable_offset(index, self.receiver_tab.get_scrollable_offset()),
+            TabId::Settings => self.record_scrollable_offset(index, self.settings_tab.get_scrollable_offset()),
+        }
+    }
+
+    fn restore_scrollable_offset(&mut self) -> Task<Message> {
+        let index: usize = self.current_tab.into();
+
+        match self.current_tab {
+            TabId::Sender => SenderTab::set_scrollable_offset(self.tabs_scrollable_offsets[index]).map(Message::Sender),
+            TabId::Receiver => ReceiverTab::set_scrollable_offset(self.tabs_scrollable_offsets[index]).map(Message::Receiver),
+            TabId::Settings => SettingsTab::set_scrollable_offset(self.tabs_scrollable_offsets[index]).map(Message::Settings),
+        }
     }
 
     pub fn switch_to_tab(
         &mut self,
         tab: TabId,
     ) -> Task<Message> {
+        self.record_tabs_scrollable_offsets();
+
         self.current_tab = tab;
-        Task::none()
+
+        let tab_task = match tab {
+            TabId::Sender => Task::none(),
+            TabId::Receiver => Task::none(),
+            TabId::Settings => Task::none(),
+        };
+
+        Task::batch([self.restore_scrollable_offset(), tab_task])
     }
 
     pub fn subscription(&self) -> iced::Subscription<Message> {

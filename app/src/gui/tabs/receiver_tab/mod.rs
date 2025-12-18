@@ -8,11 +8,11 @@ use std::{
 use iced::{
     Alignment, Element, Font, Length, Task, font,
     widget::{
-        Column,
+        Column, Id, Scrollable, button, checkbox, column, container, row,
         scrollable::{RelativeOffset, Viewport},
+        space, svg, text, text_input, tooltip,
         tooltip::Position,
     },
-    widget::{button, checkbox, column, container, row, scrollable, space, svg, text, text_input, tooltip},
 };
 
 use flash_cat_common::{consts::PUBLIC_RELAY, proto::ClientType};
@@ -68,6 +68,7 @@ pub enum Message {
 
 pub struct ReceiverTab {
     scrollable_offset: RelativeOffset,
+    scrollable_id: Id,
     share_code: String,
     lan: bool,
     fcr: Option<Arc<FlashCatReceiver>>,
@@ -79,6 +80,7 @@ impl ReceiverTab {
         (
             Self {
                 scrollable_offset: RelativeOffset::START,
+                scrollable_id: Self::scrollable_id(),
                 share_code: String::new(),
                 lan: false,
                 fcr: None,
@@ -292,12 +294,14 @@ impl ReceiverTab {
         if !self.progress_bars.is_empty() {
             column!(
                 container(
-                    scrollable(
+                    Scrollable::new(
                         Column::from_vec(self.progress_bars.iter().map(|progress_bar| { progress_bar.view().map(Message::ProgressBar) }).collect(),)
                             .padding(10)
                             .spacing(5)
                             .width(Length::Fill)
                     )
+                    .id(self.scrollable_id.clone())
+                    .on_scroll(Message::PageScrolled)
                     .height(300)
                     .direction(styles::scrollable_styles::vertical_direction())
                 )
@@ -343,5 +347,9 @@ impl Tab for ReceiverTab {
 
     fn icon_bytes() -> &'static [u8] {
         RECEIVER_ICON
+    }
+
+    fn get_scrollable_offset(&self) -> RelativeOffset {
+        self.scrollable_offset
     }
 }
