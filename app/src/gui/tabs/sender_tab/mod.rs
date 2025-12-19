@@ -23,6 +23,7 @@ use flash_cat_common::{
     },
 };
 use flash_cat_core::sender::FlashCatSender;
+use rust_i18n::t;
 
 use super::{Tab, settings_tab::settings_config::SETTINGS};
 use crate::{
@@ -242,7 +243,7 @@ impl SenderTab {
             Message::SendButtonEnter => {
                 let sender_state = SENDER_STATE.read().unwrap();
                 if sender_state.eq(&SenderState::Sending) || sender_state.eq(&SenderState::AwaitingReceive) {
-                    self.send_button_text = "Cancel".to_string();
+                    self.send_button_text = t!("app.common.cancel").to_string();
                 }
             }
             Message::SendButtonExit => {
@@ -274,7 +275,7 @@ impl SenderTab {
                 Err(e) => match e {
                     Error::Reject => *SENDER_STATE.write().unwrap() = SenderState::Reject,
                     Error::OtherClose => {
-                        *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Message("The receive end is interrupted.".to_string());
+                        *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Message(t!("app.notification.receive-interrupted").to_string());
                     }
                     Error::Errored(e) => *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Errored(e),
                     Error::RelayFailed(err_msg) => {
@@ -289,15 +290,19 @@ impl SenderTab {
     pub fn view(&self) -> Element<'_, Message> {
         let sender_state = SENDER_STATE.read().unwrap();
 
-        let mut pick_files_button = button("Files");
-        let mut pick_floders_button = button("Floders");
+        let mut pick_files_button = button(text(t!("app.tab.sender.files")));
+        let mut pick_floders_button = button(text(t!("app.tab.sender.folders")));
         if sender_state.eq(&SenderState::Idle) || sender_state.eq(&SenderState::Picked) {
             pick_files_button = pick_files_button.on_press(Message::PickFiles);
             pick_floders_button = pick_floders_button.on_press(Message::PickFloders);
         }
         let pick = column![
-            row![text("Pick").size(16), space().width(Length::Fill), row![pick_files_button, pick_floders_button].align_y(Alignment::Center).spacing(5),]
-                .align_y(Alignment::Center)
+            row![
+                text(t!("app.tab.sender.pick")).size(16),
+                space().width(Length::Fill),
+                row![pick_files_button, pick_floders_button].align_y(Alignment::Center).spacing(5),
+            ]
+            .align_y(Alignment::Center)
         ]
         .padding(5);
 
@@ -305,16 +310,16 @@ impl SenderTab {
             space().width(Length::Fill),
             text(if self.send_button_text.is_empty() {
                 if sender_state.eq(&SenderState::AwaitingReceive) {
-                    "Awaiting receive..."
+                    t!("app.tab.sender.awaiting-receive")
                 } else if sender_state.eq(&SenderState::Sending) {
-                    "Sending..."
+                    t!("app.tab.sender.sending")
                 } else if sender_state.eq(&SenderState::SendDone) {
-                    "Done"
+                    t!("app.tab.sender.done")
                 } else {
-                    "Send"
+                    t!("app.tab.sender.send")
                 }
             } else {
-                self.send_button_text.as_str()
+                std::borrow::Cow::Borrowed(self.send_button_text.as_str())
             })
             .size(18),
             space().width(Length::Fill)
@@ -333,7 +338,7 @@ impl SenderTab {
 
         let share_code = if sender_state.eq(&SenderState::AwaitingReceive) {
             row![
-                text("Share Code"),
+                text(t!("app.common.share-code")),
                 mouse_area(
                     container(text(self.share_code.as_str()).font(Font {
                         weight: font::Weight::Bold,
@@ -350,7 +355,7 @@ impl SenderTab {
                     let copyed_icon = svg(copyed_icon_handle).style(styles::svg_styles::colored_svg_theme).height(20).width(20);
                     row![
                         button(copyed_icon).style(styles::button_styles::transparent_button_theme).on_press(Message::CopySharCode),
-                        text("Copyed").style(styles::text_styles::accent_color_theme)
+                        text(t!("app.tab.sender.copied")).style(styles::text_styles::accent_color_theme)
                     ]
                     .align_y(Alignment::Center)
                 } else {
@@ -381,15 +386,12 @@ impl SenderTab {
 
     fn progress_view(&self) -> Element<'_, Message> {
         if self.paths.is_empty() {
-            let text = container(text("Pick File(s) or Folder(s) to send").font(Font {
-                weight: font::Weight::Bold,
-                ..Default::default()
-            }))
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .style(styles::container_styles::first_class_container_rounded_theme)
-            .height(300)
-            .width(Length::Fill);
+            let text = container(text(t!("app.tab.sender.pick-description")))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .style(styles::container_styles::first_class_container_rounded_theme)
+                .height(300)
+                .width(Length::Fill);
             column!(text).width(Length::Fill).spacing(5).into()
         } else {
             let sender_state = SENDER_STATE.read().unwrap();
@@ -440,45 +442,44 @@ impl SenderTab {
             let details_text = if self.fc.is_some() {
                 let fc = self.fc.clone().unwrap();
                 if sender_state.eq(&SenderState::SendDone) {
-                    format!(
-                        "Sent {} files and {} folders ({})",
-                        fc.num_files,
-                        fc.num_folders,
-                        fc.total_size_to_human_readable()
+                    t!(
+                        "app.tab.sender.sent-description",
+                        file_count = fc.num_files,
+                        folder_count = fc.num_folders,
+                        size = fc.total_size_to_human_readable()
                     )
                 } else if sender_state.eq(&SenderState::Reject) {
-                    format!(
-                        "Rejected {} files and {} folders ({})",
-                        fc.num_files,
-                        fc.num_folders,
-                        fc.total_size_to_human_readable()
+                    t!(
+                        "app.tab.sender.rejected-description",
+                        file_count = fc.num_files,
+                        folder_count = fc.num_folders,
+                        size = fc.total_size_to_human_readable()
                     )
                 } else if fc.num_folders > 0 {
-                    format!(
-                        "{} {} files and {} folders ({})",
-                        if self.start_send {
+                    t!(
+                        "app.tab.sender.sending-description",
+                        action = if self.start_send {
                             "Sending"
                         } else {
                             ""
                         },
-                        fc.num_files,
-                        fc.num_folders,
-                        fc.total_size_to_human_readable()
+                        file_count = fc.num_files,
+                        folder_count = fc.num_folders
                     )
                 } else {
-                    format!(
-                        "{} {} files ({})",
-                        if self.start_send {
+                    t!(
+                        "app.tab.sender.sending-without-folder-description",
+                        action = if self.start_send {
                             "Sending"
                         } else {
                             ""
                         },
-                        fc.num_files,
-                        fc.total_size_to_human_readable()
+                        file_count = fc.num_files,
+                        size = fc.total_size_to_human_readable()
                     )
                 }
             } else {
-                "".to_string()
+                t!("")
             };
 
             column![
@@ -498,7 +499,7 @@ impl Tab for SenderTab {
     type Message = Message;
 
     fn title() -> &'static str {
-        "Sender"
+        "app.tab.sender.title"
     }
 
     fn icon_bytes() -> &'static [u8] {

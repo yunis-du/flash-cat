@@ -11,6 +11,7 @@ use iced::{
     futures::{SinkExt, Stream, StreamExt, channel::mpsc},
     stream::try_channel,
 };
+use rust_i18n::t;
 
 use flash_cat_core::{ReceiverInteractionMessage, receiver::FlashCatReceiver};
 
@@ -47,23 +48,32 @@ pub fn run(fcr: Arc<FlashCatReceiver>) -> impl Stream<Item = Result<(u64, Progre
                     return if e.contains("NotFound") {
                         Err(Error::ShareCodeNotFound)
                     } else {
-                        Err(Error::OtherErroe(format!("An error occurred: {}", e.to_string())))
+                        Err(Error::OtherErroe(
+                            t!("app.tab.receiver.error-msg", err = e.to_string()).to_string(),
+                        ))
                     };
                 }
                 ReceiverInteractionMessage::SendFilesRequest(send_req) => {
                     let confirm_msg = if send_req.num_folders > 0 {
-                        format!("Receiving {} files and {} folders?", send_req.num_files, send_req.num_folders)
+                        t!(
+                            "app.tab.receiver.receiving-description",
+                            file_count = send_req.num_files,
+                            folder_count = send_req.num_folders
+                        )
                     } else {
-                        format!("Receiving {} files?", send_req.num_files)
+                        t!(
+                            "app.tab.receiver.receiving-without-folder-description",
+                            file_count = send_req.num_files
+                        )
                     };
                     RECV_NUM_FILES.store(send_req.num_files, Ordering::Relaxed);
-                    *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Confirm(ConfirmType::Receive, confirm_msg);
+                    *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Confirm(ConfirmType::Receive, confirm_msg.to_string());
                     let _ = sender.send((0, Progress::None)).await;
                 }
                 ReceiverInteractionMessage::FileDuplication(file_duplication) => {
-                    let confirm_msg = format!("overwrite '{}'?", file_duplication.path);
+                    let confirm_msg = t!("app.tab.receiver.overwrite", file_path = file_duplication.path);
                     *RECEIVER_NOTIFICATION.write().unwrap() =
-                        ReceiverNotification::Confirm(ConfirmType::FileDuplication(file_duplication.file_id), confirm_msg);
+                        ReceiverNotification::Confirm(ConfirmType::FileDuplication(file_duplication.file_id), confirm_msg.to_string());
                     let _ = sender.send((file_duplication.file_id, Progress::None)).await;
                 }
                 ReceiverInteractionMessage::RecvNewFile(recv_new_file) => {
@@ -84,12 +94,13 @@ pub fn run(fcr: Arc<FlashCatReceiver>) -> impl Stream<Item = Result<(u64, Progre
                     let _ = sender.send((file_id, Progress::Finished)).await;
                 }
                 ReceiverInteractionMessage::OtherClose => {
-                    *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Errored("The sender stopped sending".to_string());
+                    *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Errored(t!("app.tab.receiver.send-stop-err").to_string());
                     let _ = sender.send((0, Progress::Finished)).await;
                 }
                 ReceiverInteractionMessage::ReceiveDone => {
                     *RECEIVER_STATE.write().unwrap() = ReceiverState::RecvDone;
-                    *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Confirm(ConfirmType::OpenSavePath, "Open the saved directory?".to_string());
+                    *RECEIVER_NOTIFICATION.write().unwrap() =
+                        ReceiverNotification::Confirm(ConfirmType::OpenSavePath, t!("app.tab.receiver.open-saved-dir").to_string());
                     let _ = sender.send((0, Progress::Finished)).await;
                 }
             }

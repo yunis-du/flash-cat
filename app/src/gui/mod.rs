@@ -5,6 +5,7 @@ use iced::{
     font::Weight,
     widget::{column, container, image, row, text},
 };
+
 use tabs::{
     Message as TabsControllerMessage, TabId, TabsController,
     settings_tab::settings_config::{self, SETTINGS},
@@ -107,6 +108,7 @@ impl Default for FlashCatApp {
 pub mod title_bar {
     use iced::widget::{Row, container, mouse_area, row, space, svg, text};
     use iced::{Alignment, Length};
+    use rust_i18n::t;
 
     use crate::gui::{styles, tabs::TabLabel};
 
@@ -142,7 +144,7 @@ pub mod title_bar {
             let tab_views = tab_labels.iter().enumerate().map(|(index, tab_label)| {
                 let svg_handle = svg::Handle::from_memory(tab_label.icon);
                 let icon = svg(svg_handle).width(Length::Shrink).style(styles::svg_styles::colored_svg_theme);
-                let text_label = text(tab_label.text).size(18);
+                let text_label = text(t!(tab_label.text)).size(18);
                 let mut tab =
                     container(mouse_area(row![icon, text_label].align_y(Alignment::Center).spacing(5)).on_press(Message::TabSelected(index))).padding(5);
 

@@ -1,0 +1,67 @@
+app:
+  common:
+    share-code: "分享码"
+    cancel: "取消"
+    yes: "是"
+    no: "否"
+  tab:
+    sender:
+      title: "发送"
+      notification:
+        receive-interrupted: "接收方已中断。"
+        wait-msg: "文件发送完毕。正在等待接收方完成接收..."
+        connect-relay-failed: "连接到 %{relay_type} 中继失败: %{err}"
+      pick: "选择"
+      files: "文件"
+      folders: "文件夹"
+      awaiting-receive: "等待接收..."
+      sending: "正在发送..."
+      done: "完成"
+      send: "发送"
+      copied: "已复制"
+      pick-description: "选择要发送的文件或文件夹"
+      sent-description: "已发送 %{file_count} 个文件和 %{folder_count} 个文件夹 (%{size})"
+      rejected-description: "已拒绝 %{file_count} 个文件和 %{folder_count} 个文件夹 (%{size})"
+      sending-description: "%{action} %{file_count} 个文件和 %{folder_count} 个文件夹"
+      sending-without-folder-description: "%{action} %{file_count} 个文件 (%{size})"
+    receiver:
+      title: "接收"
+      notification:
+        share-code-not-found: "未找到，请检查分享码。"
+      tooltips:
+        sender-in-same-area: "发送方在同一个局域网内"
+      lan: "局域网"
+      receiving: "正在接收"
+      done: "完成"
+      recv: "接收"
+      enter-share-code-to-receive: "输入分享码接收文件"
+      error-msg: "发生错误: %{err}"
+      receiving-description: "接收 %{file_count} 个文件和 %{folder_count} 个文件夹？"
+      receiving-without-folder-description: "接收 %{file_count} 个文件？"
+      overwrite: "覆盖 '%{file_path}'？"
+      send-stop-err: "发送方停止了发送"
+      open-saved-dir: "打开保存目录？"
+    settings:
+      title: "设置"
+      about-widget:
+        title: "关于"
+        version: "版本"
+        author: "作者"
+        license: "许可证"
+        repository: "仓库"
+        commit-hash: "提交哈希"
+        built-time: "构建时间 (UTC)"
+      appearance-widget:
+        title: "外观"
+        theme: "主题"
+        theme-light: "浅色"
+        theme-dark: "深色"
+      general-widget:
+        title: "通用"
+        language: "语言"
+        relay-address: "中继地址"
+        relay-address-low: "中继地址"
+        relay-address-description: "Flash-Cat 中继地址"
+        save: "保存"
+        save-path: "保存路径"
+        save-path-description: "接收文件的保存路径"

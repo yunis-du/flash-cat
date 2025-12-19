@@ -3,6 +3,7 @@ use iced::{
     widget::{button, column, container, grid, mouse_area, row, svg, text},
 };
 use log::error;
+use rust_i18n::t;
 
 use crate::gui::{assets::icons::GITHUB_ICON, styles};
 
@@ -31,7 +32,9 @@ impl About {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let content = column![text("About").style(styles::text_styles::accent_color_theme).size(21), info_widget(), social_buttons(),].spacing(10);
+        let content =
+            column![text(t!("app.tab.settings.about-widget.title")).style(styles::text_styles::accent_color_theme).size(21), info_widget(), social_buttons(),]
+                .spacing(10);
 
         container(content).style(styles::container_styles::first_class_container_rounded_theme).width(1000).padding(5).into()
     }
@@ -44,22 +47,28 @@ fn info_widget() -> Element<'static, Message> {
 
     let mut grid = grid![
         // author
-        row![text("Author").width(120), text(built_info::PKG_AUTHORS)],
+        row![text(t!("app.tab.settings.about-widget.author")).width(120), text(built_info::PKG_AUTHORS)],
         // version
-        row![text("Version").width(120), text(built_info::PKG_VERSION)],
+        row![text(t!("app.tab.settings.about-widget.version")).width(120), text(built_info::PKG_VERSION)],
         // license
-        row![text("License").width(120), text(built_info::PKG_LICENSE)],
+        row![text(t!("app.tab.settings.about-widget.license")).width(120), text(built_info::PKG_LICENSE)],
         // repository
-        row![text("Repository").width(120), repository],
+        row![text(t!("app.tab.settings.about-widget.repository")).width(120), repository],
     ]
     .height(grid::Sizing::EvenlyDistribute(Length::Shrink))
     .columns(1);
 
     if let Some(commit_hash) = built_info::GIT_COMMIT_HASH {
-        grid = grid.push(row![text("Commit Hash").width(120), text(commit_hash)]);
+        grid = grid.push(row![
+            text(t!("app.tab.settings.about-widget.commit-hash")).width(120),
+            text(commit_hash)
+        ]);
     }
 
-    grid = grid.push(row![text("Build Time").width(120), text(built_info::BUILT_TIME_UTC)]);
+    grid = grid.push(row![
+        text(t!("app.tab.settings.about-widget.built-time")).width(120),
+        text(built_info::BUILT_TIME_UTC)
+    ]);
 
     grid.into()
 }

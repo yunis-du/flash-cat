@@ -1,0 +1,68 @@
+app:
+  common:
+    share-code: "Share code"
+    cancel: "Cancel"
+    yes: "Yes"
+    no: "No"
+  tab:
+    sender:
+      title: "Send"
+      notification:
+        receive-interrupted: "The receive end is interrupted."
+        wait-msg: "Send files done. Waiting for the receiver to receive finish..."
+        connect-relay-failed: "connect to %{relay_type} relay failed: %{err}"
+      pick: "Pick"
+      files: "Files"
+      folders: "Folders"
+      awaiting-receive: "Awaiting receive..."
+      sending: "Sending..."
+      done: "Done"
+      send: "Send"
+      copied: "Copied"
+      pick-description: "Pick File(s) or Folder(s) to send"
+      sent-description: "Sent %{file_count} files and %{folder_count} folders (%{size})"
+      rejected-description: "Rejected %{file_count} files and %{folder_count} folders (%{size})"
+      sending-description: "%{action} %{file_count} files and %{folder_count} folders"
+      sending-without-folder-description: "%{action} %{file_count} files (%{size})"
+    receiver:
+      title: "Receive"
+      notification:
+        share-code-not-found: "Not found, Please check share code."
+      tooltips:
+        sender-in-same-area: "Sender is in the same local area network"
+      lan: "LAN"
+      receiving: "Receiving"
+      done: "Done"
+      recv: "Recv"
+      enter-share-code-to-receive: "Enter share code to receive"
+      error-msg: "An error occurred: %{err}"
+      receiving-description: "Receiving %{file_count} files and %{folder_count} folders?"
+      receiving-without-folder-description: "Receiving %{file_count} files?"
+      overwrite: "overwrite '%{file_path}'?"
+      send-stop-err: "The sender stopped sending"
+      open-saved-dir: "Open the saved directory?"
+    settings:
+      title: "Settings"
+      about-widget:
+        title: "About"
+        version: "Version"
+        author: "Author"
+        license: "License"
+        repository: "Repository"
+        commit-hash: "Commit Hash"
+        built-time: "Built Time (UTC)"
+      appearance-widget:
+        title: "Appearance"
+        theme: "Theme"
+        theme-light: "Light"
+        theme-dark: "Dark"
+      general-widget:
+        title: "General"
+        language: "Language"
+        relay-address: "Relay Address"
+        relay-address-low: "relay address"
+        relay-address-description: "Flash-Cat relay address"
+        save: "Save"
+        save-path: "Save Path"
+        save-path-description: "The path where the received file is saved"
+    

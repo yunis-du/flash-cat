@@ -6,7 +6,7 @@ use std::{
 };
 
 use iced::{
-    Alignment, Element, Font, Length, Task, font,
+    Alignment, Element, Length, Task,
     widget::{
         Column, Id, Scrollable, button, checkbox, column, container, row,
         scrollable::{RelativeOffset, Viewport},
@@ -14,6 +14,7 @@ use iced::{
         tooltip::Position,
     },
 };
+use rust_i18n::t;
 
 use flash_cat_common::{consts::PUBLIC_RELAY, proto::ClientType};
 use flash_cat_core::{ReceiverConfirm, receiver::FlashCatReceiver};
@@ -165,7 +166,7 @@ impl ReceiverTab {
                 }
                 Err(e) => match e {
                     Error::ShareCodeNotFound => {
-                        *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Errored("Not found, Please check share code.".to_string())
+                        *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Errored(t!("app.tab.receiver.share-code-not-found").to_string());
                     }
                     Error::OtherErroe(err_msg) => *RECEIVER_NOTIFICATION.write().unwrap() = ReceiverNotification::Errored(err_msg),
                 },
@@ -225,17 +226,26 @@ impl ReceiverTab {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let share_code_input =
-            row![text("Share Code"), space().width(Length::Fill), text_input("", &self.share_code).on_input(Message::ShareCodeChanged).padding(5),]
-                .spacing(5)
-                .padding(5)
-                .align_y(iced::Alignment::Center);
+        let share_code_input = row![
+            text(t!("app.common.share-code")),
+            space().width(Length::Fill),
+            text_input("", &self.share_code).on_input(Message::ShareCodeChanged).padding(5),
+        ]
+        .spacing(5)
+        .padding(5)
+        .align_y(iced::Alignment::Center);
 
         let help_icon = svg(svg::Handle::from_memory(HELP_ICON)).style(styles::svg_styles::colored_svg_theme).height(20).width(20);
 
-        let help_tooltip = tooltip(help_icon, "Sender is in the same local area network", Position::FollowCursor).gap(10).style(container::rounded_box);
+        let help_tooltip = tooltip(
+            help_icon,
+            text(t!("app.tab.receiver.tooltips.sender-in-same-area")),
+            Position::FollowCursor,
+        )
+        .gap(10)
+        .style(container::rounded_box);
 
-        let lan_checkbox = row![checkbox(self.lan).label("LAN").on_toggle(|lan| Message::LanChanged(lan)), help_tooltip,]
+        let lan_checkbox = row![checkbox(self.lan).label(t!("app.tab.receiver.lan")).on_toggle(|lan| Message::LanChanged(lan)), help_tooltip]
             .spacing(5)
             .padding(5)
             .align_y(iced::Alignment::Center);
@@ -250,11 +260,11 @@ impl ReceiverTab {
         let mut recv_button = button(row![
             space().width(Length::Fill),
             text(if receiver_state_read.eq(&ReceiverState::Recving) {
-                "Receiving"
+                t!("app.tab.receiver.receiving")
             } else if receiver_state_read.eq(&ReceiverState::RecvDone) || errored {
-                "Done"
+                t!("app.tab.receiver.done")
             } else {
-                "Recv"
+                t!("app.tab.receiver.recv")
             })
             .size(18),
             space().width(Length::Fill)
@@ -280,8 +290,8 @@ impl ReceiverTab {
             ReceiverNotification::Confirm(confirm_type, confirm_msg) => row![
                 text(confirm_msg).style(styles::text_styles::accent_color_theme).width(Length::Fixed(350.0)),
                 space().width(Length::Fill),
-                button("Yes").on_press(Message::Confirm(confirm_type.clone(), true)),
-                button("No").on_press(Message::Confirm(confirm_type.clone(), false)),
+                button(text(t!("app.common.yes"))).on_press(Message::Confirm(confirm_type.clone(), true)),
+                button(text(t!("app.common.no"))).on_press(Message::Confirm(confirm_type.clone(), false)),
             ]
             .spacing(5)
             .align_y(Alignment::Center),
@@ -314,17 +324,11 @@ impl ReceiverTab {
             .into()
         } else {
             column!(
-                container(
-                    text(if RECEIVER_STATE.read().unwrap().eq(&ReceiverState::Recving) {
-                        "Recving..."
-                    } else {
-                        "Enter share code to receive"
-                    })
-                    .font(Font {
-                        weight: font::Weight::Bold,
-                        ..Default::default()
-                    })
-                )
+                container(text(if RECEIVER_STATE.read().unwrap().eq(&ReceiverState::Recving) {
+                    t!("app.tab.receiver.receiving")
+                } else {
+                    t!("app.tab.receiver.enter-share-code-to-receive")
+                }))
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
                 .style(styles::container_styles::first_class_container_rounded_theme)
@@ -342,7 +346,7 @@ impl Tab for ReceiverTab {
     type Message = Message;
 
     fn title() -> &'static str {
-        "Receiver"
+        "app.tab.receiver.title"
     }
 
     fn icon_bytes() -> &'static [u8] {

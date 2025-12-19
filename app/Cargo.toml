@@ -27,6 +27,7 @@ directories = "6.0"
 iced = { version = "0.14", features = ["image", "svg", "tokio", "wgpu"] }
 open = "5.3.0"
 rfd = "0.16"
+rust-i18n = "3"
 webbrowser = "1"
 
 [build-dependencies]

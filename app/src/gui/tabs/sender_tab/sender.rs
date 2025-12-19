@@ -5,6 +5,7 @@ use iced::{
     futures::{SinkExt, Stream, StreamExt, channel::mpsc},
     stream::try_channel,
 };
+use rust_i18n::t;
 
 use flash_cat_core::{SenderInteractionMessage, sender::FlashCatSender};
 
@@ -41,11 +42,14 @@ fn run(fcs: Arc<FlashCatSender>) -> impl Stream<Item = Result<(u64, Progress), E
                     return Err(Error::Reject);
                 }
                 SenderInteractionMessage::RelayFailed((relay_type, error)) => {
-                    return Err(Error::RelayFailed(format!(
-                        "connect to {} relay failed: {}",
-                        relay_type.to_string(),
-                        error
-                    )));
+                    return Err(Error::RelayFailed(
+                        t!(
+                            "app.tab.sender.connect-relay-failed",
+                            relay_type = relay_type.to_string(),
+                            error = error
+                        )
+                        .to_string(),
+                    ));
                 }
                 SenderInteractionMessage::ContinueFile(file_id) => {
                     let _ = sender.send((file_id, Progress::Skip)).await;
@@ -60,8 +64,7 @@ fn run(fcs: Arc<FlashCatSender>) -> impl Stream<Item = Result<(u64, Progress), E
                     return Err(Error::OtherClose);
                 }
                 SenderInteractionMessage::SendDone => {
-                    *SENDER_NOTIFICATION.write().unwrap() =
-                        SenderNotification::Message("Send files done. Waiting for the receiver to receive finish...".to_string());
+                    *SENDER_NOTIFICATION.write().unwrap() = SenderNotification::Message(t!("app.tab.sender.wait-msg").to_string());
                     let _ = sender.send((0, Progress::Done)).await;
                 }
                 SenderInteractionMessage::Completed => {

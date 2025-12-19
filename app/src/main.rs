@@ -3,16 +3,20 @@
 use anyhow::Result;
 use iced::{Font, Settings, Size, window};
 
-use flash_cat_app::gui::{FlashCatApp, assets};
+use flash_cat_app::gui::{FlashCatApp, assets, tabs::settings_tab::settings_config::SETTINGS};
 
 fn main() -> Result<()> {
     let icon = window::icon::from_file_data(assets::logos::ICON_LOGO, None).ok();
+
+    // set i18n
+    let i18n = SETTINGS.read().unwrap().get_current_settings().general.i18n.clone();
+    rust_i18n::set_locale(&i18n);
 
     iced::application(FlashCatApp::default, FlashCatApp::update, FlashCatApp::view)
         .subscription(FlashCatApp::subscription)
         .theme(FlashCatApp::theme)
         .window(iced::window::Settings {
-            size: Size::new(480.0, 700.0),
+            size: Size::new(480.0, 725.0),
             icon,
             resizable: false,
             ..Default::default()

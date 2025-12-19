@@ -87,7 +87,7 @@ impl Tab for SettingsTab {
     type Message = Message;
 
     fn title() -> &'static str {
-        "Settings"
+        "app.tab.settings.title"
     }
 
     fn icon_bytes() -> &'static [u8] {
@@ -104,6 +104,7 @@ pub mod settings_config {
 
     use flash_cat_common::consts::{APP_CONFIG_FILE_NAME, APP_NAME, PUBLIC_RELAY};
     use log::error;
+    use rust_i18n::t;
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -121,8 +122,8 @@ pub mod settings_config {
             f: &mut std::fmt::Formatter<'_>,
         ) -> std::fmt::Result {
             let str = match self {
-                Theme::Light => "Light",
-                Theme::Dark => "Dark",
+                Theme::Light => t!("app.tab.settings.appearance-widget.theme-light").to_string(),
+                Theme::Dark => t!("app.tab.settings.appearance-widget.theme-dark").to_string(),
             };
 
             write!(f, "{}", str)
@@ -142,6 +143,7 @@ pub mod settings_config {
                 general: GeneralSettings {
                     download_path,
                     relay_addr: format!("https://{PUBLIC_RELAY}"),
+                    i18n: "en".to_string(),
                 },
                 appearance: AppearanceSettings::default(),
             }
@@ -157,6 +159,7 @@ pub mod settings_config {
     pub struct GeneralSettings {
         pub download_path: String,
         pub relay_addr: String,
+        pub i18n: String,
     }
 
     pub static SETTINGS: LazyLock<Arc<RwLock<Settings>>> = LazyLock::new(|| Arc::new(RwLock::new(Settings::new())));
