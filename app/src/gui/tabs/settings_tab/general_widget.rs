@@ -166,6 +166,6 @@ impl General {
 
         let content = content.push(i18n_widget).push(relay_addr_widget).push(save_path_widget);
 
-        container(content).style(styles::container_styles::first_class_container_rounded_theme).width(1000).into()
+        container(content).style(styles::container_styles::first_class_container_rounded_theme).width(Length::Fill).into()
     }
 }

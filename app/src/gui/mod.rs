@@ -107,7 +107,7 @@ impl Default for FlashCatApp {
 
 pub mod title_bar {
     use iced::widget::{Row, container, mouse_area, row, space, svg, text};
-    use iced::{Alignment, Length};
+    use iced::{Alignment, Length, mouse};
     use rust_i18n::t;
 
     use crate::gui::{styles, tabs::TabLabel};
@@ -145,8 +145,12 @@ pub mod title_bar {
                 let svg_handle = svg::Handle::from_memory(tab_label.icon);
                 let icon = svg(svg_handle).width(Length::Shrink).style(styles::svg_styles::colored_svg_theme);
                 let text_label = text(t!(tab_label.text)).size(18);
-                let mut tab =
-                    container(mouse_area(row![icon, text_label].align_y(Alignment::Center).spacing(5)).on_press(Message::TabSelected(index))).padding(5);
+                let mut tab = container(
+                    mouse_area(row![icon, text_label].align_y(Alignment::Center).spacing(5))
+                        .interaction(mouse::Interaction::Pointer)
+                        .on_press(Message::TabSelected(index)),
+                )
+                .padding(5);
 
                 // Highlighting the tab if is active
                 if index == self.active_tab {

@@ -36,7 +36,7 @@ impl About {
             column![text(t!("app.tab.settings.about-widget.title")).style(styles::text_styles::accent_color_theme).size(21), info_widget(), social_buttons(),]
                 .spacing(10);
 
-        container(content).style(styles::container_styles::first_class_container_rounded_theme).width(1000).padding(5).into()
+        container(content).style(styles::container_styles::first_class_container_rounded_theme).width(Length::Fill).padding(5).into()
     }
 }
 
