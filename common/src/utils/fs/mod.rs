@@ -209,7 +209,7 @@ pub fn zip_folder<P: AsRef<Path>>(
 
     let file = File::create(&file_name)?;
     let mut zip = ZipWriter::new(file);
-    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Bzip2).unix_permissions(0o755);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated).unix_permissions(0o755);
 
     let root_dir = file_name.strip_suffix(".zip").unwrap_or(&file_name);
 
@@ -265,7 +265,9 @@ pub fn zip_folder<P: AsRef<Path>>(
 
         let entry_path = entry.path();
         let relative_path = entry_path.strip_prefix(path).unwrap_or(entry_path).to_string_lossy();
-        let path_in_zip = format!("{}/{}", root_dir, relative_path);
+        // The ZIP specification requires the use of a forward slash '/' as the path separator.
+        // On Windows, a backslash needs to be replaced.
+        let path_in_zip = format!("{}/{}", root_dir, relative_path.replace('\\', "/"));
 
         if entry_path.is_dir() {
             // Check for empty directory
