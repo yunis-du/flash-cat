@@ -79,48 +79,55 @@ impl Send {
             progress.add_progress(&file.name, file.file_id, file.size);
         }
 
-        let mut stream = Arc::new(self.sender.clone()).start().await?;
-        while !self.shutdown.is_terminated() {
-            if let Some(sender_msg) = stream.next().await {
-                match sender_msg {
-                    SenderInteractionMessage::Message(msg) => println!("{msg}"),
-                    SenderInteractionMessage::Error(e) => {
-                        println!("An error occurred: {}", e.to_string());
-                        self.shutdown();
-                    }
-                    SenderInteractionMessage::ReceiverReject => {
-                        println!("Receiver reject this share. exit...");
-                        self.shutdown();
-                    }
-                    SenderInteractionMessage::RelayFailed((relay_type, error)) => {
-                        if RelayType::Local.eq(&relay_type) || RelayType::Specify.eq(&relay_type) {
-                            process::exit(1);
-                        } else {
-                            println!("connect to {} relay failed: {}", relay_type.to_string(), error);
+        match Arc::new(self.sender.clone()).start().await {
+            Ok(mut stream) => {
+                while !self.shutdown.is_terminated() {
+                    if let Some(sender_msg) = stream.next().await {
+                        match sender_msg {
+                            SenderInteractionMessage::Message(msg) => println!("{msg}"),
+                            SenderInteractionMessage::Error(e) => {
+                                println!("An error occurred: {}", e.to_string());
+                                self.shutdown();
+                            }
+                            SenderInteractionMessage::ReceiverReject => {
+                                println!("Receiver reject this share. exit...");
+                                self.shutdown();
+                            }
+                            SenderInteractionMessage::RelayFailed((relay_type, error)) => {
+                                if RelayType::Local.eq(&relay_type) || RelayType::Specify.eq(&relay_type) {
+                                    process::exit(1);
+                                } else {
+                                    println!("connect to {} relay failed: {}", relay_type.to_string(), error);
+                                }
+                            }
+                            SenderInteractionMessage::ContinueFile(file_id) => {
+                                progress.skip(file_id);
+                            }
+                            SenderInteractionMessage::FileProgress(file_progress) => {
+                                progress.set_position(file_progress.file_id, file_progress.position);
+                            }
+                            SenderInteractionMessage::FileProgressFinish(file_id) => {
+                                progress.finish(file_id);
+                            }
+                            SenderInteractionMessage::OtherClose => {
+                                println!("The receive end is interrupted. exit...");
+                                self.shutdown();
+                            }
+                            SenderInteractionMessage::SendDone => {
+                                print!("Send files done. don't close this window, waiting for the receiver to receive finish...");
+                                stdout().flush()?;
+                            }
+                            SenderInteractionMessage::Completed => {
+                                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                                self.shutdown();
+                            }
                         }
                     }
-                    SenderInteractionMessage::ContinueFile(file_id) => {
-                        progress.skip(file_id);
-                    }
-                    SenderInteractionMessage::FileProgress(file_progress) => {
-                        progress.set_position(file_progress.file_id, file_progress.position);
-                    }
-                    SenderInteractionMessage::FileProgressFinish(file_id) => {
-                        progress.finish(file_id);
-                    }
-                    SenderInteractionMessage::OtherClose => {
-                        println!("The receive end is interrupted. exit...");
-                        self.shutdown();
-                    }
-                    SenderInteractionMessage::SendDone => {
-                        print!("Send files done. don't close this window, waiting for the receiver to receive finish...");
-                        stdout().flush()?;
-                    }
-                    SenderInteractionMessage::Completed => {
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        self.shutdown();
-                    }
                 }
+            }
+            Err(e) => {
+                self.shutdown();
+                return Err(e);
             }
         }
 

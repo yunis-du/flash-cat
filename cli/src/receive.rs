@@ -39,6 +39,7 @@ impl Receive {
 
     pub async fn run(&self) -> Result<()> {
         let mut stream = Arc::new(self.receiver.clone()).start().await.map_err(|e| {
+            self.shutdown();
             if e.to_string().contains("NotFound") {
                 anyhow!("Not found, Please check share code.")
             } else {
