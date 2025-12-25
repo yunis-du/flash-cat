@@ -17,6 +17,13 @@ edition = "2024"
 repository = "https://github.com/yunis-du/flash-cat"
 rust-version = "1.85"
 
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = "z"
+
 [workspace.dependencies]
 flash_cat_common = {path = "common" }
 flash_cat_core = {path = "core" }
@@ -44,4 +51,4 @@ tonic-build = "0.14"
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
 tonic-reflection = "0.14"
-zip = "6.0.0"
+zip = "7.0.0"
