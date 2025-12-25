@@ -284,7 +284,7 @@ impl FlashCatSender {
                 if compare_versions(client_latest_version.as_str(), built_info::PKG_VERSION) == std::cmp::Ordering::Greater {
                     let _ = sender_stream_tx
                         .send(SenderInteractionMessage::Message(format!(
-                            "newly cli version[{}] is available",
+                            "newly cli version[{}] is available, use `flash-cat update` to upgrade!",
                             client_latest_version
                         )))
                         .await;
