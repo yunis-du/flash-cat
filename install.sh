@@ -115,7 +115,7 @@ main() {
     # Install binary
     echo -e "${BLUE}Installing...${NC}"
     chmod +x "$TMP_DIR/flash-cat"
-    sudo mv "$TMP_DIR/flash-cat" "$INSTALL_DIR/"
+    mv "$TMP_DIR/flash-cat" "$INSTALL_DIR/"
     
     echo -e "${GREEN}Installation completed successfully!${NC}"
     echo -e "${BLUE}Show flash-cat version...${NC}"
