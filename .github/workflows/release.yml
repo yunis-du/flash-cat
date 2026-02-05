@@ -10,42 +10,19 @@ env:
 
 jobs:
   # ====================
-  # CLI Cross Compilation
+  # CLI - Linux (Cross Compilation)
   # ====================
-  build-cli:
-    name: CLI - ${{ matrix.target }}
+  build-cli-linux:
+    name: CLI - Linux ${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux
           - target: x86_64-unknown-linux-musl
-            os_name: linux
             arch: x86_64
-            ext: tar.gz
           - target: aarch64-unknown-linux-musl
-            os_name: linux
             arch: aarch64
-            ext: tar.gz
-          # macOS
-          - target: x86_64-apple-darwin
-            os_name: macos
-            arch: x86_64
-            ext: tar.gz
-          - target: aarch64-apple-darwin
-            os_name: macos
-            arch: aarch64
-            ext: tar.gz
-          # Windows
-          - target: x86_64-pc-windows-gnu
-            os_name: windows
-            arch: x86_64
-            ext: zip
-          - target: i686-pc-windows-gnu
-            os_name: windows
-            arch: i686
-            ext: zip
 
     steps:
       - name: Checkout
@@ -66,23 +43,106 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Package (tar.gz)
-        if: matrix.ext == 'tar.gz'
+      - name: Package
         run: |
           cd target/${{ matrix.target }}/release
-          tar -czvf ../../../flash-cat-cli-${{ matrix.os_name }}-${{ steps.version.outputs.version }}-${{ matrix.arch }}.${{ matrix.ext }} flash-cat
-
-      - name: Package (zip)
-        if: matrix.ext == 'zip'
-        run: |
-          cd target/${{ matrix.target }}/release
-          zip ../../../flash-cat-cli-${{ matrix.os_name }}-${{ steps.version.outputs.version }}-${{ matrix.arch }}.${{ matrix.ext }} flash-cat.exe
+          tar -czvf ../../../flash-cat-cli-linux-${{ steps.version.outputs.version }}-${{ matrix.arch }}.tar.gz flash-cat
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cli-${{ matrix.os_name }}-${{ matrix.arch }}
-          path: flash-cat-cli-*
+          name: cli-linux-${{ matrix.arch }}
+          path: flash-cat-cli-*.tar.gz
+
+  # ====================
+  # CLI - Windows (Cross Compilation)
+  # ====================
+  build-cli-windows:
+    name: CLI - Windows ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-gnu
+            arch: x86_64
+          - target: i686-pc-windows-gnu
+            arch: i686
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build CLI
+        run: cross build --release -p flash_cat_cli --target ${{ matrix.target }}
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          zip ../../../flash-cat-cli-windows-${{ steps.version.outputs.version }}-${{ matrix.arch }}.zip flash-cat.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-windows-${{ matrix.arch }}
+          path: flash-cat-cli-*.zip
+
+  # ====================
+  # CLI - macOS (Native Build)
+  # ====================
+  build-cli-macos:
+    name: CLI - macOS ${{ matrix.arch }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            arch: x86_64
+          - target: aarch64-apple-darwin
+            arch: aarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install protoc
+        run: brew install protobuf
+
+      - name: Build CLI
+        run: cargo build --release -p flash_cat_cli --target ${{ matrix.target }}
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czvf ../../../flash-cat-cli-macos-${{ steps.version.outputs.version }}-${{ matrix.arch }}.tar.gz flash-cat
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-macos-${{ matrix.arch }}
+          path: flash-cat-cli-*.tar.gz
 
   # ====================
   # Linux Packages (deb/rpm)
@@ -140,7 +200,7 @@ jobs:
   # macOS APP (Native Build)
   # ====================
   build-app-macos:
-    name: APP - macOS
+    name: APP - macOS ${{ matrix.arch }}
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -160,15 +220,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install protoc
+        run: brew install protobuf
+
       - name: Build APP
         run: cargo build --release -p flash_cat_app --target ${{ matrix.target }}
 
       - name: Get version
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      # TODO: Add code signing and notarization steps if needed
-      # TODO: Package as .dmg or .app bundle
 
       - name: Package
         run: |
@@ -197,6 +257,9 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      - name: Install protoc
+        run: choco install protoc
+
       - name: Build APP
         run: cargo build --release -p flash_cat_app --target x86_64-pc-windows-msvc
 
@@ -222,7 +285,7 @@ jobs:
   # ====================
   release:
     name: Create Release
-    needs: [build-cli, build-packages, build-app-macos, build-app-windows]
+    needs: [build-cli-linux, build-cli-windows, build-cli-macos, build-packages, build-app-macos, build-app-windows]
     runs-on: ubuntu-latest
 
     steps:
