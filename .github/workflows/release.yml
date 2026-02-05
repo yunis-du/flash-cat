@@ -272,7 +272,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-macos-${{ matrix.arch }}
-          path: target/release/*.dmg
+          path: target/${{ matrix.target }}/release/*.dmg
 
   # ====================
   # Windows APP (Native Build)
@@ -311,7 +311,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-windows-x86_64
-          path: target/release/*.exe
+          path: target/x86_64-pc-windows-msvc/release/*.exe
 
   # ====================
   # Create Release

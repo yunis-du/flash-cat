@@ -48,7 +48,6 @@ winres = "0.1.12"
 # basic info
 product-name = "FlashCatApp"
 identifier = "com.yunisdu.flashcat"
-version = "2.1.8"
 description = "Securely send the file folder from one computer to another computer."
 homepage = "https://github.com/yunis-du/flash-cat"
 license-file = "../LICENSE"
