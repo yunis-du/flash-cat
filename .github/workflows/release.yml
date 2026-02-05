@@ -262,7 +262,10 @@ jobs:
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
 
-      - name: Build and Package APP
+      - name: Build APP
+        run: cargo build --release -p flash_cat_app --target ${{ matrix.target }}
+
+      - name: Package APP
         run: cargo packager --release -p flash_cat_app --target ${{ matrix.target }} --formats dmg
 
       - name: Upload artifact
@@ -298,7 +301,10 @@ jobs:
       - name: Install NSIS
         run: choco install nsis -y
 
-      - name: Build and Package APP
+      - name: Build APP
+        run: cargo build --release -p flash_cat_app --target x86_64-pc-windows-msvc
+
+      - name: Package APP
         run: cargo packager --release -p flash_cat_app --target x86_64-pc-windows-msvc --formats nsis
 
       - name: Upload artifact
