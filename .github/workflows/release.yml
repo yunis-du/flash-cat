@@ -10,7 +10,7 @@ env:
 
 jobs:
   # ====================
-  # CLI - Linux (Cross Compilation)
+  # CLI - Linux (Native Build)
   # ====================
   build-cli-linux:
     name: CLI - Linux ${{ matrix.arch }}
@@ -28,6 +28,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install musl tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+          fi
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -38,11 +46,10 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
       - name: Build CLI
-        run: cross build --release -p flash_cat_cli --target ${{ matrix.target }}
+        run: cargo build --release -p flash_cat_cli --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Get version
         id: version
@@ -60,18 +67,18 @@ jobs:
           path: flash-cat-cli-*.tar.gz
 
   # ====================
-  # CLI - Windows (Cross Compilation)
+  # CLI - Windows (Native Build)
   # ====================
   build-cli-windows:
     name: CLI - Windows ${{ matrix.arch }}
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-pc-windows-gnu
+          - target: x86_64-pc-windows-msvc
             arch: x86_64
-          - target: i686-pc-windows-gnu
+          - target: i686-pc-windows-msvc
             arch: i686
 
     steps:
@@ -88,20 +95,19 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
       - name: Build CLI
-        run: cross build --release -p flash_cat_cli --target ${{ matrix.target }}
+        run: cargo build --release -p flash_cat_cli --target ${{ matrix.target }}
 
       - name: Get version
         id: version
+        shell: bash
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Package
+        shell: pwsh
         run: |
           cd target/${{ matrix.target }}/release
-          zip ../../../flash-cat-cli-windows-${{ steps.version.outputs.version }}-${{ matrix.arch }}.zip flash-cat.exe
+          Compress-Archive -Path flash-cat.exe -DestinationPath ../../../flash-cat-cli-windows-${{ steps.version.outputs.version }}-${{ matrix.arch }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -134,7 +140,9 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install protoc
-        run: brew install protobuf
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build CLI
         run: cargo build --release -p flash_cat_cli --target ${{ matrix.target }}
@@ -175,6 +183,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install musl tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+          fi
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -185,13 +201,13 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install cross and tools
-        run: |
-          cargo install cross --git https://github.com/cross-rs/cross
-          cargo install cargo-deb cargo-generate-rpm
+      - name: Install cargo tools
+        run: cargo install cargo-deb cargo-generate-rpm
 
       - name: Build binary
-        run: cross build --release -p flash_cat_cli --target ${{ matrix.target }}
+        run: cargo build --release -p flash_cat_cli --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
 
       - name: Build deb package
         run: cargo deb -p flash_cat_cli --no-build --variant ${{ matrix.target }} --target ${{ matrix.target }}
@@ -236,7 +252,9 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install protoc
-        run: brew install protobuf
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build APP
         run: cargo build --release -p flash_cat_app --target ${{ matrix.target }}
@@ -273,7 +291,9 @@ jobs:
           targets: x86_64-pc-windows-msvc
 
       - name: Install protoc
-        run: choco install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build APP
         run: cargo build --release -p flash_cat_app --target x86_64-pc-windows-msvc
