@@ -1,0 +1,261 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ====================
+  # CLI Cross Compilation
+  # ====================
+  build-cli:
+    name: CLI - ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - target: x86_64-unknown-linux-musl
+            os_name: linux
+            arch: x86_64
+            ext: tar.gz
+          - target: aarch64-unknown-linux-musl
+            os_name: linux
+            arch: aarch64
+            ext: tar.gz
+          # macOS
+          - target: x86_64-apple-darwin
+            os_name: macos
+            arch: x86_64
+            ext: tar.gz
+          - target: aarch64-apple-darwin
+            os_name: macos
+            arch: aarch64
+            ext: tar.gz
+          # Windows
+          - target: x86_64-pc-windows-gnu
+            os_name: windows
+            arch: x86_64
+            ext: zip
+          - target: i686-pc-windows-gnu
+            os_name: windows
+            arch: i686
+            ext: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build CLI
+        run: cross build --release -p flash_cat_cli --target ${{ matrix.target }}
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Package (tar.gz)
+        if: matrix.ext == 'tar.gz'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czvf ../../../flash-cat-cli-${{ matrix.os_name }}-${{ steps.version.outputs.version }}-${{ matrix.arch }}.${{ matrix.ext }} flash-cat
+
+      - name: Package (zip)
+        if: matrix.ext == 'zip'
+        run: |
+          cd target/${{ matrix.target }}/release
+          zip ../../../flash-cat-cli-${{ matrix.os_name }}-${{ steps.version.outputs.version }}-${{ matrix.arch }}.${{ matrix.ext }} flash-cat.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.os_name }}-${{ matrix.arch }}
+          path: flash-cat-cli-*
+
+  # ====================
+  # Linux Packages (deb/rpm)
+  # ====================
+  build-packages:
+    name: Packages - ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch: x86_64
+            deb_arch: amd64
+          - target: aarch64-unknown-linux-musl
+            arch: aarch64
+            deb_arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross and tools
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+          cargo install cargo-deb cargo-generate-rpm
+
+      - name: Build binary
+        run: cross build --release -p flash_cat_cli --target ${{ matrix.target }}
+
+      - name: Build deb package
+        run: cargo deb -p flash_cat_cli --no-build --variant ${{ matrix.target }} --target ${{ matrix.target }}
+
+      - name: Build rpm package
+        run: cargo generate-rpm -p cli --variant ${{ matrix.target }} --target ${{ matrix.target }}
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.deb_arch }}
+          path: target/${{ matrix.target }}/debian/*.deb
+
+      - name: Upload rpm artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ matrix.arch }}
+          path: target/${{ matrix.target }}/generate-rpm/*.rpm
+
+  # ====================
+  # macOS APP (Native Build)
+  # ====================
+  build-app-macos:
+    name: APP - macOS
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            arch: x86_64
+          - target: aarch64-apple-darwin
+            arch: aarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build APP
+        run: cargo build --release -p flash_cat_app --target ${{ matrix.target }}
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      # TODO: Add code signing and notarization steps if needed
+      # TODO: Package as .dmg or .app bundle
+
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czvf ../../../flash-cat-app-macos-${{ steps.version.outputs.version }}-${{ matrix.arch }}.tar.gz flash-cat-app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-macos-${{ matrix.arch }}
+          path: flash-cat-app-*.tar.gz
+
+  # ====================
+  # Windows APP (Native Build)
+  # ====================
+  build-app-windows:
+    name: APP - Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build APP
+        run: cargo build --release -p flash_cat_app --target x86_64-pc-windows-msvc
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Package
+        shell: pwsh
+        run: |
+          cd target/x86_64-pc-windows-msvc/release
+          Compress-Archive -Path flash-cat-app.exe -DestinationPath ../../../flash-cat-app-windows-${{ steps.version.outputs.version }}-x86_64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-windows-x86_64
+          path: flash-cat-app-*.zip
+
+  # ====================
+  # Create Release
+  # ====================
+  release:
+    name: Create Release
+    needs: [build-cli, build-packages, build-app-macos, build-app-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Collect all files
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.deb" -o -name "*.rpm" \) -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
