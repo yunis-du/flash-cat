@@ -1,0 +1,64 @@
+[common]
+edit_tooltip = "Edit"
+update_tooltip = "Update"
+cancel_tooltip = "Cancel"
+flashcat_description = "Securely send files between computers"
+share_code = "Share Code"
+copy = "Copy"
+
+[titlebar]
+language = "Language"
+theme = "Theme"
+light = "Light"
+dark = "Dark"
+system = "System"
+github_tooltip = "Follow on GitHub"
+
+[tab]
+send_label = "Send"
+receive_label = "Receive"
+settings_label = "Settings"
+
+[send]
+select = "Select"
+file = "File"
+folder = "Folder"
+placeholder = "Select files or folders to send"
+file_counter = "%{file_count} files and %{folder_count} folders"
+clean_all_files = "Clear"
+send = "Send"
+sending = "Sending..."
+cancel_send = "Cancel Send"
+awaiting_receive = "Waiting for Receive..."
+send_done = "Complete Send"
+
+[receive]
+placeholder = "Enter share code to receive"
+receive = "Receive"
+receiving = "Receiving..."
+receive_done = "Complete Receive"
+cancel_receive = "Cancel Receive"
+confirm_receive = "Receive %{file_count} files (%{folder_count} folders)?"
+confirm_receive_no_folder = "Receive %{file_count} files?"
+file_duplicate = "File %{file_path} already exists. Overwrite?"
+error_share_code_not_found = "Share code not found"
+error_other = "Receive failed: %{error}"
+open_save_path = "Open save directory?"
+lan = "LAN"
+lan_tooltip = "Sender is in the same LAN"
+
+[settings]
+general = "General"
+language = "Language"
+relay_address = "Relay Address"
+relay_address_description = "flashcat relay address"
+save_path = "Save Path"
+save_path_description = "Receive file save path"
+open_save_path_tooltip = "Open Save Path"
+edit_save_path_tooltip = "Edit Save Path"
+
+about = "About"
+author = "Author"
+version = "Version"
+license = "License"
+repository = "Repository"
