@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -256,23 +259,17 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build APP
-        run: cargo build --release -p flash_cat_app --target ${{ matrix.target }}
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked
 
-      - name: Get version
-        id: version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Package
-        run: |
-          cd target/${{ matrix.target }}/release
-          tar -czvf ../../../flash-cat-app-macos-${{ steps.version.outputs.version }}-${{ matrix.arch }}.tar.gz flash-cat-app
+      - name: Build and Package APP
+        run: cargo packager --release -p flash_cat_app --target ${{ matrix.target }} --formats dmg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-macos-${{ matrix.arch }}
-          path: flash-cat-app-*.tar.gz
+          path: target/release/*.dmg
 
   # ====================
   # Windows APP (Native Build)
@@ -295,25 +292,20 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build APP
-        run: cargo build --release -p flash_cat_app --target x86_64-pc-windows-msvc
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked
 
-      - name: Get version
-        id: version
-        shell: bash
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Install NSIS
+        run: choco install nsis -y
 
-      - name: Package
-        shell: pwsh
-        run: |
-          cd target/x86_64-pc-windows-msvc/release
-          Compress-Archive -Path flash-cat-app.exe -DestinationPath ../../../flash-cat-app-windows-${{ steps.version.outputs.version }}-x86_64.zip
+      - name: Build and Package APP
+        run: cargo packager --release -p flash_cat_app --target x86_64-pc-windows-msvc --formats nsis
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-windows-x86_64
-          path: flash-cat-app-*.zip
+          path: target/release/*.exe
 
   # ====================
   # Create Release
@@ -338,7 +330,7 @@ jobs:
       - name: Collect all files
         run: |
           mkdir -p release
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.deb" -o -name "*.rpm" \) -exec cp {} release/ \;
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.deb" -o -name "*.rpm" -o -name "*.dmg" -o -name "*.exe" \) -exec cp {} release/ \;
           ls -la release/
 
       - name: Generate checksums
