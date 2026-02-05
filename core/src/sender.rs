@@ -2,6 +2,15 @@ use std::{net::SocketAddr, path::Path, pin::Pin, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use bytes::{Bytes, BytesMut};
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, AsyncSeekExt, SeekFrom},
+    signal::ctrl_c,
+    sync::mpsc,
+};
+use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
+use tonic::transport::Endpoint;
+
 use flash_cat_common::{
     Shutdown, compare_versions,
     consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY, SEND_BUFF_SIZE},
@@ -17,16 +26,8 @@ use flash_cat_common::{
     },
 };
 use flash_cat_relay::{built_info, relay::Relay};
-use tokio::{
-    fs::File,
-    io::{AsyncReadExt, AsyncSeekExt, SeekFrom},
-    signal::ctrl_c,
-    sync::mpsc,
-};
-use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
-use tonic::transport::Endpoint;
 
-use crate::{Progress, RelayType, SenderInteractionMessage, get_endpoint};
+use crate::{PING_INTERVAL, Progress, RelayType, SenderInteractionMessage, get_endpoint, send_msg_to_relay};
 
 /// Broadcast local relay addr timeout.
 pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -366,6 +367,7 @@ impl FlashCatSender {
             _ => public_or_specify_shutdown.clone(),
         };
 
+        let mut ping_interval = tokio::time::interval(PING_INTERVAL);
         loop {
             let message = tokio::select! {
                 _ = shutdown.wait() => {
@@ -374,6 +376,10 @@ impl FlashCatSender {
                     })
                     .await?;
                     return Ok(());
+                }
+                _ = ping_interval.tick() => {
+                    let _ = send_msg_to_relay(&tx, RelayMessage::Ping(0)).await;
+                    continue;
                 }
                 item = messages.next() => {
                     item.context("server closed connection")??
@@ -399,7 +405,7 @@ impl FlashCatSender {
                         // close local relay
                         local_relay_shutdown.shutdown();
                     }
-                    Self::send_msg_to_relay(
+                    send_msg_to_relay(
                         &tx,
                         RelayMessage::Sender(SenderUpdate {
                             sender_message: Some(SenderMessage::SendRequest(SendRequest {
@@ -443,7 +449,7 @@ impl FlashCatSender {
                                             });
                                         }
                                         Confirm::Reject => {
-                                            Self::send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
+                                            send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
                                             Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::ReceiverReject).await?;
                                         }
                                     }
@@ -488,7 +494,7 @@ impl FlashCatSender {
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
     ) -> Result<()> {
         for send_file in file_collector.files.iter() {
-            Self::send_msg_to_relay(
+            send_msg_to_relay(
                 &tx,
                 RelayMessage::Sender(SenderUpdate {
                     sender_message: Some(SenderMessage::NewFileRequest(NewFileRequest {
@@ -541,7 +547,7 @@ impl FlashCatSender {
                         }
                         if break_point_confirm.confirm == Confirm::Accept.into() {
                             position = break_point_confirm.position;
-                            Self::send_msg_to_relay(
+                            send_msg_to_relay(
                                 &tx,
                                 RelayMessage::Sender(SenderUpdate {
                                     sender_message: Some(SenderMessage::BreakPoint(BreakPoint {
@@ -565,7 +571,7 @@ impl FlashCatSender {
                 let mut buffer = BytesMut::with_capacity(SEND_BUFF_SIZE);
                 let read_length = read_file.read_buf(&mut buffer).await?;
                 if read_length == 0 {
-                    Self::send_msg_to_relay(
+                    send_msg_to_relay(
                         &tx,
                         RelayMessage::Sender(SenderUpdate {
                             sender_message: Some(SenderMessage::FileDone(FileDone {
@@ -581,7 +587,7 @@ impl FlashCatSender {
                     .await?;
                     break;
                 }
-                Self::send_msg_to_relay(
+                send_msg_to_relay(
                     &tx,
                     RelayMessage::Sender(SenderUpdate {
                         sender_message: Some(SenderMessage::FileData(FileData {
@@ -602,7 +608,7 @@ impl FlashCatSender {
                 .await?;
             }
         }
-        Self::send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
+        send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
         Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::SendDone).await?;
         Ok(())
     }
@@ -659,17 +665,6 @@ impl FlashCatSender {
             task.await??;
         }
         Ok((files, zip_files))
-    }
-
-    async fn send_msg_to_relay(
-        tx: &mpsc::Sender<RelayUpdate>,
-        msg: RelayMessage,
-    ) -> Result<()> {
-        let relay_update = RelayUpdate {
-            relay_message: Some(msg),
-        };
-        tx.send(relay_update).await?;
-        Ok(())
     }
 
     async fn send_msg_to_stream(

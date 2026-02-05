@@ -2,9 +2,13 @@ use std::time::Duration;
 
 use anyhow::Result;
 use bytes::Bytes;
+use tokio::sync::mpsc;
 use tonic::transport::Endpoint;
 
-use flash_cat_common::consts::{DEFAULT_GRPC_TIMEOUT, DEFAULT_HTTP2_KEEPALIVE_INTERVAL, DEFAULT_HTTP2_KEEPALIVE_TIMEOUT, DEFAULT_TCP_KEEPALIVE};
+use flash_cat_common::{
+    consts::{DEFAULT_HTTP2_KEEPALIVE_INTERVAL, DEFAULT_HTTP2_KEEPALIVE_TIMEOUT, DEFAULT_TCP_KEEPALIVE},
+    proto::{RelayUpdate, relay_update::RelayMessage},
+};
 
 pub mod receiver;
 pub mod sender;
@@ -106,7 +110,18 @@ fn get_endpoint(s: impl Into<Bytes>) -> Result<Endpoint> {
         .http2_keep_alive_interval(DEFAULT_HTTP2_KEEPALIVE_INTERVAL)
         .keep_alive_timeout(DEFAULT_HTTP2_KEEPALIVE_TIMEOUT)
         .http2_adaptive_window(true) // enable adaptive window size
-        .tcp_keepalive(Some(DEFAULT_TCP_KEEPALIVE)) // set TCP keepalive
-        .timeout(DEFAULT_GRPC_TIMEOUT); // set overall request timeout
+        .tcp_keepalive(Some(DEFAULT_TCP_KEEPALIVE)); // set TCP keepalive
     Ok(endpoint)
+}
+
+/// Send message to relay
+pub async fn send_msg_to_relay(
+    tx: &mpsc::Sender<RelayUpdate>,
+    msg: RelayMessage,
+) -> Result<()> {
+    let relay_update = RelayUpdate {
+        relay_message: Some(msg),
+    };
+    tx.send(relay_update).await?;
+    Ok(())
 }

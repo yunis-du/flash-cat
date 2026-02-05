@@ -34,7 +34,10 @@ use flash_cat_common::{
 };
 use flash_cat_relay::built_info;
 
-use crate::{BreakPoint, FileDuplication, Progress, ReceiverConfirm, ReceiverInteractionMessage, RecvNewFile, RelayType, SendFilesRequest, get_endpoint};
+use crate::{
+    BreakPoint, FileDuplication, PING_INTERVAL, Progress, ReceiverConfirm, ReceiverInteractionMessage, RecvNewFile, RelayType, SendFilesRequest, get_endpoint,
+    send_msg_to_relay,
+};
 
 static OUT_DIR: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new("".to_string()));
 
@@ -284,6 +287,7 @@ impl FlashCatReceiver {
         let resp = client.channel(TokioReceiverStream::new(rx)).await?;
         let mut messages = resp.into_inner(); // A stream of relay messages.
 
+        let mut ping_interval = tokio::time::interval(PING_INTERVAL);
         loop {
             let message = tokio::select! {
                 _ = shutdown.wait() => {
@@ -292,6 +296,10 @@ impl FlashCatReceiver {
                     })
                     .await?;
                     return Ok(());
+                }
+                _ = ping_interval.tick() => {
+                    let _ = send_msg_to_relay(&tx, RelayMessage::Ping(0)).await;
+                    continue;
                 }
                 Ok(confirm) = confirm_rx.recv() => {
                     match confirm {
@@ -302,14 +310,14 @@ impl FlashCatReceiver {
                                         Confirm::Accept.into(),
                                     )),
                                 });
-                                Self::send_msg_to_relay(&tx, share_accept).await?;
+                                send_msg_to_relay(&tx, share_accept).await?;
                             } else {
                                 let share_reject = RelayMessage::Receiver(ReceiverUpdate {
                                     receiver_message: Some(ReceiverMessage::ShareConfirm(
                                         Confirm::Reject.into(),
                                     )),
                                 });
-                                Self::send_msg_to_relay(&tx, share_reject).await?;
+                                send_msg_to_relay(&tx, share_reject).await?;
                             }
                         }
                         ReceiverConfirm::FileConfirm((accept, file_id)) => {
@@ -340,7 +348,7 @@ impl FlashCatReceiver {
                                     )),
                                 })
                             };
-                            Self::send_msg_to_relay(&tx, file_confirm).await?;
+                            send_msg_to_relay(&tx, file_confirm).await?;
                         }
                         ReceiverConfirm::BreakPointConfirm((accept, file_id, position)) => {
                             let break_point_confirm = if accept {
@@ -372,7 +380,7 @@ impl FlashCatReceiver {
                                     )),
                                 })
                             };
-                            Self::send_msg_to_relay(&tx, break_point_confirm).await?;
+                            send_msg_to_relay(&tx, break_point_confirm).await?;
                         }
                     }
                     continue;
@@ -418,7 +426,7 @@ impl FlashCatReceiver {
                                 let absolute_path = Path::new(OUT_DIR.read().unwrap().as_str()).join(relative_path.as_str());
                                 if new_file_req.is_empty_dir {
                                     tokio::fs::create_dir_all(&absolute_path).await?;
-                                    Self::send_msg_to_relay(&tx, accept_msg).await?;
+                                    send_msg_to_relay(&tx, accept_msg).await?;
                                     continue;
                                 }
 
@@ -488,7 +496,7 @@ impl FlashCatReceiver {
                                     recv_file.file.set_len(new_file_req.total_size).await?;
                                     recv_files.insert(new_file_req.file_id, recv_file);
 
-                                    Self::send_msg_to_relay(&tx, accept_msg).await?;
+                                    send_msg_to_relay(&tx, accept_msg).await?;
                                 }
                             }
                             SenderMessage::BreakPoint(break_point) => {
@@ -540,7 +548,7 @@ impl FlashCatReceiver {
                     .await?;
                 }
                 RelayMessage::Done(_) => {
-                    Self::send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
+                    send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
                     Self::send_msg_to_stream(receiver_stream_tx, ReceiverInteractionMessage::ReceiveDone).await?;
                 }
                 RelayMessage::Error(e) => {
@@ -561,18 +569,6 @@ impl FlashCatReceiver {
 
     pub async fn terminated(&self) {
         self.shutdown.wait().await
-    }
-
-    /// Send message to relay.
-    async fn send_msg_to_relay(
-        tx: &mpsc::Sender<RelayUpdate>,
-        msg: RelayMessage,
-    ) -> Result<()> {
-        let relay_update = RelayUpdate {
-            relay_message: Some(msg),
-        };
-        tx.send(relay_update).await?;
-        Ok(())
     }
 
     /// Send message to receiver. cli | app
