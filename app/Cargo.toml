@@ -76,6 +76,7 @@ timestamp-url = "http://timestamp.digicert.com"
 # Windows NSIS installer config
 [package.metadata.packager.nsis]
 compression = "lzma"
+installer-icon = "assets/logos/icons/icon.ico"
 
 # Windows resource config
 [package.metadata.winres]
