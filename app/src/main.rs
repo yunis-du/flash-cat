@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+#[cfg(not(target_os = "linux"))]
+use gpui::TitlebarOptions;
 use gpui::{App, Application, Bounds, Entity, Menu, MenuItem, Window, WindowAppearance, WindowBounds, WindowOptions, prelude::*, px, size};
 use gpui_component::{ActiveTheme, Root, Theme, ThemeMode, v_flex};
 
