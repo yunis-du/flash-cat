@@ -16,19 +16,69 @@ path="src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-confy.workspace = true
 flash_cat_common.workspace = true
 flash_cat_core.workspace = true
+chrono.workspace = true
 indicatif.workspace = true
-log.workspace = true
 serde.workspace = true
 tokio.workspace = true
-directories = "6.0"
-iced = { version = "0.14", features = ["image", "svg", "tokio", "wgpu"] }
-open = "5.3.0"
-rfd = "0.16"
+tokio-stream.workspace = true
+
+gpui = "0.2.2"
+gpui-component = "0.5.0"
+gpui-component-assets = "0.5.0"
+gpui-macros = "0.2.2"
 rust-i18n = "3"
-webbrowser = "1"
+rfd = "0.17"
+tracing = "0.1.44"
+schemars = "1.2.0"
+toml = "0.9.10"
+directories = "6.0.0"
+open = "5.3.0"
+rust-embed = { version = "8.9.0", default-features = false }
+locale_config = "0.3.0"
+futures = "0.3"
 
 [build-dependencies]
 built.workspace = true
+winres = "0.1.12"
+
+
+[package.metadata.packager]
+# basic info
+product-name = "FlashCatApp"
+identifier = "com.yunisdu.flashcat"
+version = "2.1.8"
+description = "Securely send the file folder from one computer to another computer."
+homepage = "https://github.com/yunis-du/flash-cat"
+license-file = "../LICENSE"
+copyright = "Copyright © 2026 Yunis Du. All rights reserved."
+category = "Utility"
+
+# icons
+icons = [
+    "assets/logos/icons/icon.icns",
+    "assets/logos/icons/icon.ico",
+    "assets/logos/icons/icon.png",
+    "assets/logos/icons/32x32.png",
+    "assets/logos/icons/128x128.png",
+    "assets/logos/icons/128x128@2x.png",
+]
+
+# macOS specific config
+[package.metadata.packager.macos]
+minimum-system-version = "12.0"
+
+# Windows specific config
+[package.metadata.packager.windows]
+digest-algorithm = "sha256"
+timestamp-url = "http://timestamp.digicert.com"
+
+# Windows NSIS installer config
+[package.metadata.packager.nsis]
+compression = "lzma"
+
+# Windows resource config
+[package.metadata.winres]
+OriginalFilename = "flash-cat-app.exe"
+LegalCopyright = "Copyright © 2026 Yunis Du. All rights reserved."

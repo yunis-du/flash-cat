@@ -82,6 +82,14 @@ impl FileCollector {
     pub fn total_size_to_human_readable(&self) -> String {
         human_bytes(self.total_size)
     }
+
+    pub fn file_count(&self) -> u64 {
+        self.num_files
+    }
+
+    pub fn folder_count(&self) -> u64 {
+        self.num_folders
+    }
 }
 
 /// Collect how many files exist in the paths, how many folders, and the total size.
