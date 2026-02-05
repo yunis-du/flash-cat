@@ -336,7 +336,10 @@ jobs:
       - name: Collect all files
         run: |
           mkdir -p release
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.deb" -o -name "*.rpm" -o -name "*.dmg" -o -name "*.exe" \) -exec cp {} release/ \;
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.deb" -o -name "*.rpm" -o -name "*.dmg" \) -exec cp {} release/ \;
+          # Only copy NSIS installer (exclude raw exe)
+          find artifacts -type f -name "*setup*.exe" -exec cp {} release/ \;
+          find artifacts -type f -name "*installer*.exe" -exec cp {} release/ \;
           ls -la release/
 
       - name: Generate checksums
