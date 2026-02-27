@@ -64,8 +64,7 @@ impl NetScout {
                     socket.send_to(match_content, broadcast_addr).await?;
                 }
                 Ok(recv_len) = socket.recv(&mut buf) => {
-                    let recv_buf = buf[..recv_len].as_ref();
-                    if b"ok".eq(recv_buf) {
+                    if &buf[..recv_len] == b"ok" {
                         return Ok(());
                     }
                 }
@@ -100,9 +99,9 @@ impl NetScout {
                     if recv_len == 0 {
                         continue;
                     }
-                    let match_buf = buf[..match_content_len].as_ref();
-                    if match_content.eq(match_buf) {
-                        port_buf[..].copy_from_slice(buf[match_content_len..recv_len].as_ref());
+                    let match_buf: &[u8] = &buf[..match_content_len];
+                    if match_content == match_buf {
+                        port_buf[..].copy_from_slice(&buf[match_content_len..recv_len]);
                         let _ = socket.send_to(b"ok", remote_addr).await;
                         remote_addr.set_port(u16::from_be_bytes(port_buf));
                         return Ok(Some(remote_addr));

@@ -1,7 +1,7 @@
 use std::time::{Duration, SystemTime};
 
 use indicatif::{HumanBytes, HumanDuration};
-use rand::{Rng, SeedableRng, distr::Alphanumeric};
+use rand::{RngExt, distr::Alphanumeric};
 
 pub mod fs;
 pub mod net;
@@ -20,7 +20,7 @@ pub fn convert_bytes_to_human_readable(bytes: u64) -> String {
 }
 
 pub fn gen_share_code() -> String {
-    let mut rng = rand::rngs::StdRng::from_os_rng();
+    let mut rng = rand::rng();
     format!(
         "{}-{}-{}",
         rng.random_range(10..99),
