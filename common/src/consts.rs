@@ -20,3 +20,18 @@ pub const DEFAULT_TCP_KEEPALIVE: Duration = Duration::from_secs(30);
 
 /// Send buffer size: 32Kib
 pub const SEND_BUFF_SIZE: usize = 32 * 1024;
+
+/// Max reconnect retries.
+pub const MAX_RECONNECT_RETRIES: u32 = 5;
+
+/// Base delay for reconnect (exponential backoff).
+pub const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(2);
+
+/// Max delay for reconnect.
+pub const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
+
+/// Default connect timeout.
+pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Initial HTTP/2 connection and stream window size (2MB).
+pub const INITIAL_WINDOW_SIZE: u32 = 2 * 1024 * 1024;

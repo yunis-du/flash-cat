@@ -6,7 +6,10 @@ use tokio::sync::mpsc;
 use tonic::transport::Endpoint;
 
 use flash_cat_common::{
-    consts::{DEFAULT_HTTP2_KEEPALIVE_INTERVAL, DEFAULT_HTTP2_KEEPALIVE_TIMEOUT, DEFAULT_TCP_KEEPALIVE},
+    consts::{
+        DEFAULT_CONNECT_TIMEOUT, DEFAULT_HTTP2_KEEPALIVE_INTERVAL, DEFAULT_HTTP2_KEEPALIVE_TIMEOUT, DEFAULT_TCP_KEEPALIVE, MAX_RECONNECT_RETRIES,
+        RECONNECT_BASE_DELAY, RECONNECT_MAX_DELAY,
+    },
     proto::{RelayUpdate, relay_update::RelayMessage},
 };
 
@@ -107,11 +110,28 @@ pub struct RecvNewFile {
 
 fn get_endpoint(s: impl Into<Bytes>) -> Result<Endpoint> {
     let endpoint = Endpoint::from_shared(s.into())?
+        .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
         .http2_keep_alive_interval(DEFAULT_HTTP2_KEEPALIVE_INTERVAL)
         .keep_alive_timeout(DEFAULT_HTTP2_KEEPALIVE_TIMEOUT)
         .http2_adaptive_window(true) // enable adaptive window size
         .tcp_keepalive(Some(DEFAULT_TCP_KEEPALIVE)); // set TCP keepalive
     Ok(endpoint)
+}
+
+/// Calculate reconnect delay with exponential backoff and jitter.
+pub fn reconnect_delay(attempt: u32) -> Duration {
+    let base = RECONNECT_BASE_DELAY.as_millis() as u64;
+    let delay = base.saturating_mul(1u64 << attempt.min(5));
+    let max = RECONNECT_MAX_DELAY.as_millis() as u64;
+    let capped = delay.min(max);
+    // Add ~25% jitter
+    let jitter = capped / 4;
+    Duration::from_millis(capped + (jitter / 2)) // simple deterministic jitter
+}
+
+/// Whether the given attempt exceeds the max reconnect retries.
+pub fn should_retry(attempt: u32) -> bool {
+    attempt < MAX_RECONNECT_RETRIES
 }
 
 /// Send message to relay

@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use tokio::{
     fs,
     io::{AsyncSeekExt, AsyncWriteExt, SeekFrom},
@@ -23,9 +23,9 @@ use flash_cat_common::{
     consts::{PUBLIC_RELAY, SEND_BUFF_SIZE},
     crypt::encryptor::Encryptor,
     proto::{
-        BreakPointConfirm, Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, Id, JoinRequest, NewFileConfirm, ReceiverUpdate, RelayUpdate,
-        file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient, relay_update::RelayMessage,
-        sender_update::SenderMessage,
+        BreakPointConfirm, Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, FileResumeProgress, Id, JoinRequest, NewFileConfirm,
+        ReceiverUpdate, RelayUpdate, ResumeState, file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage,
+        relay_service_client::RelayServiceClient, relay_update::RelayMessage, sender_update::SenderMessage,
     },
     utils::{
         fs::{missing_chunks, reset_path},
@@ -262,14 +262,16 @@ impl FlashCatReceiver {
         Ok(())
     }
 
-    async fn relay_channel(
-        encryptor: Arc<Encryptor>,
-        endpoint: Endpoint,
-        receiver_stream_tx: &mpsc::Sender<ReceiverInteractionMessage>,
-        confirm_rx: async_channel::Receiver<ReceiverConfirm>,
-        shutdown: Shutdown,
-    ) -> Result<()> {
-        let mut client = RelayServiceClient::connect(endpoint).await?;
+    /// Establish a gRPC channel stream connection for receiver.
+    async fn establish_channel(
+        encryptor: &Encryptor,
+        endpoint: &Endpoint,
+    ) -> Result<(
+        RelayServiceClient<tonic::transport::Channel>,
+        mpsc::Sender<RelayUpdate>,
+        tonic::Streaming<RelayUpdate>,
+    )> {
+        let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
 
         let (tx, rx) = mpsc::channel(1024);
 
@@ -282,19 +284,32 @@ impl FlashCatReceiver {
         })
         .await?;
 
+        let resp = client.channel(TokioReceiverStream::new(rx)).await?;
+        let messages = resp.into_inner();
+
+        Ok((client, tx, messages))
+    }
+
+    async fn relay_channel(
+        encryptor: Arc<Encryptor>,
+        endpoint: Endpoint,
+        receiver_stream_tx: &mpsc::Sender<ReceiverInteractionMessage>,
+        confirm_rx: async_channel::Receiver<ReceiverConfirm>,
+        shutdown: Shutdown,
+    ) -> Result<()> {
+        let (mut client, mut tx, mut messages) = Self::establish_channel(&encryptor, &endpoint).await?;
+
         let mut recv_files = HashMap::new();
 
-        let resp = client.channel(TokioReceiverStream::new(rx)).await?;
-        let mut messages = resp.into_inner(); // A stream of relay messages.
-
         let mut ping_interval = tokio::time::interval(PING_INTERVAL);
+        let mut reconnect_attempt = 0u32;
         loop {
             let message = tokio::select! {
                 _ = shutdown.wait() => {
-                    client.close(CloseRequest {
+                    let _ = client.close(CloseRequest {
                         encrypted_share_code: encryptor.encrypt_share_code_bytes(),
                     })
-                    .await?;
+                    .await;
                     return Ok(());
                 }
                 _ = ping_interval.tick() => {
@@ -386,9 +401,55 @@ impl FlashCatReceiver {
                     continue;
                 }
                 item = messages.next() => {
-                    item.context("server closed connection")??
-                        .relay_message
-                        .context("server message is missing")?
+                    match item {
+                        Some(Ok(update)) => {
+                            match update.relay_message {
+                                Some(msg) => {
+                                    reconnect_attempt = 0;
+                                    msg
+                                }
+                                None => continue,
+                            }
+                        }
+                        Some(Err(_)) | None => {
+                            // Stream disconnected - attempt reconnect
+                            if shutdown.is_terminated() {
+                                return Ok(());
+                            }
+                            if !crate::should_retry(reconnect_attempt) {
+                                bail!("max reconnect retries exceeded");
+                            }
+                            let delay = crate::reconnect_delay(reconnect_attempt);
+                            let _ = Self::send_msg_to_stream(
+                                receiver_stream_tx,
+                                ReceiverInteractionMessage::Message(format!(
+                                    "Connection lost, reconnecting in {}s... (attempt {}/{})",
+                                    delay.as_secs(),
+                                    reconnect_attempt + 1,
+                                    flash_cat_common::consts::MAX_RECONNECT_RETRIES
+                                )),
+                            )
+                            .await;
+                            tokio::time::sleep(delay).await;
+                            reconnect_attempt += 1;
+
+                            match Self::establish_channel(&encryptor, &endpoint).await {
+                                Ok((new_client, new_tx, new_messages)) => {
+                                    client = new_client;
+                                    tx = new_tx;
+                                    messages = new_messages;
+                                    ping_interval = tokio::time::interval(PING_INTERVAL);
+                                    let _ = Self::send_msg_to_stream(
+                                        receiver_stream_tx,
+                                        ReceiverInteractionMessage::Message("Reconnected successfully".to_string()),
+                                    )
+                                    .await;
+                                    continue;
+                                }
+                                Err(_) => continue,
+                            }
+                        }
+                    }
                 }
             };
 
@@ -534,6 +595,27 @@ impl FlashCatReceiver {
                                 Self::send_msg_to_stream(
                                     receiver_stream_tx,
                                     ReceiverInteractionMessage::FileProgressFinish(file_done.file_id),
+                                )
+                                .await?;
+                            }
+                            SenderMessage::ResumeRequest(_) => {
+                                // Sender reconnected and asks for current file progress
+                                let mut files = Vec::new();
+                                for (&file_id, recv_file) in recv_files.iter() {
+                                    files.push(FileResumeProgress {
+                                        file_id,
+                                        received_bytes: recv_file.get_progress(),
+                                        completed: false,
+                                    });
+                                }
+                                // Reply with ResumeState
+                                send_msg_to_relay(
+                                    &tx,
+                                    RelayMessage::Receiver(ReceiverUpdate {
+                                        receiver_message: Some(ReceiverMessage::ResumeState(ResumeState {
+                                            files,
+                                        })),
+                                    }),
                                 )
                                 .await?;
                             }

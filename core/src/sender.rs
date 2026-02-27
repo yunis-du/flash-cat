@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::Path, pin::Pin, sync::Arc, time::Duration};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use bytes::{Bytes, BytesMut};
 use tokio::{
     fs::File,
@@ -335,16 +335,18 @@ impl FlashCatSender {
         Ok(())
     }
 
-    async fn relay_channel(
-        relay_type: RelayType,
-        encryptor: Arc<Encryptor>,
-        file_collector: Arc<FileCollector>,
-        endpoint: Endpoint,
-        sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
-        public_or_specify_shutdown: Shutdown,
-        local_relay_shutdown: Shutdown,
-    ) -> Result<()> {
-        let mut client = RelayServiceClient::connect(endpoint).await?;
+    /// Establish a gRPC channel stream connection. Returns the client, tx, messages stream, and confirm channels.
+    async fn establish_channel(
+        encryptor: &Encryptor,
+        endpoint: &Endpoint,
+    ) -> Result<(
+        RelayServiceClient<tonic::transport::Channel>,
+        mpsc::Sender<RelayUpdate>,
+        tonic::Streaming<RelayUpdate>,
+        async_channel::Sender<FileConfirm>,
+        async_channel::Receiver<FileConfirm>,
+    )> {
+        let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
 
         let (tx, rx) = mpsc::channel(1024);
 
@@ -358,9 +360,23 @@ impl FlashCatSender {
         .await?;
 
         let resp = client.channel(ReceiverStream::new(rx)).await?;
-        let mut messages = resp.into_inner(); // A stream of relay messages.
+        let messages = resp.into_inner();
 
         let (confirm_tx, confirm_rx) = async_channel::bounded(10);
+
+        Ok((client, tx, messages, confirm_tx, confirm_rx))
+    }
+
+    async fn relay_channel(
+        relay_type: RelayType,
+        encryptor: Arc<Encryptor>,
+        file_collector: Arc<FileCollector>,
+        endpoint: Endpoint,
+        sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
+        public_or_specify_shutdown: Shutdown,
+        local_relay_shutdown: Shutdown,
+    ) -> Result<()> {
+        let (mut client, mut tx, mut messages, mut confirm_tx, confirm_rx) = Self::establish_channel(&encryptor, &endpoint).await?;
 
         let shutdown = match relay_type {
             RelayType::Local => local_relay_shutdown.clone(),
@@ -368,13 +384,17 @@ impl FlashCatSender {
         };
 
         let mut ping_interval = tokio::time::interval(PING_INTERVAL);
+        let mut reconnect_attempt = 0u32;
+        let mut is_first_connect = true;
+        let mut send_files_shutdown = Shutdown::new();
         loop {
             let message = tokio::select! {
                 _ = shutdown.wait() => {
-                    client.close(CloseRequest {
+                    send_files_shutdown.shutdown();
+                    let _ = client.close(CloseRequest {
                         encrypted_share_code: encryptor.encrypt_share_code_bytes(),
                     })
-                    .await?;
+                    .await;
                     return Ok(());
                 }
                 _ = ping_interval.tick() => {
@@ -382,9 +402,61 @@ impl FlashCatSender {
                     continue;
                 }
                 item = messages.next() => {
-                    item.context("server closed connection")??
-                        .relay_message
-                        .context("server message is missing")?
+                    match item {
+                        Some(Ok(update)) => {
+                            match update.relay_message {
+                                Some(msg) => {
+                                    reconnect_attempt = 0;
+                                    msg
+                                }
+                                None => continue,
+                            }
+                        }
+                        Some(Err(_)) | None => {
+                            // Stream disconnected - attempt reconnect
+                            if shutdown.is_terminated() {
+                                return Ok(());
+                            }
+                            // Cancel the old send_files task
+                            send_files_shutdown.shutdown();
+
+                            if !crate::should_retry(reconnect_attempt) {
+                                bail!("max reconnect retries exceeded");
+                            }
+                            let delay = crate::reconnect_delay(reconnect_attempt);
+                            let _ = Self::send_msg_to_stream(
+                                sender_stream_tx,
+                                SenderInteractionMessage::Message(format!(
+                                    "Connection lost, reconnecting in {}s... (attempt {}/{})",
+                                    delay.as_secs(),
+                                    reconnect_attempt + 1,
+                                    flash_cat_common::consts::MAX_RECONNECT_RETRIES
+                                )),
+                            )
+                            .await;
+                            tokio::time::sleep(delay).await;
+                            reconnect_attempt += 1;
+
+                            match Self::establish_channel(&encryptor, &endpoint).await {
+                                Ok((new_client, new_tx, new_messages, new_confirm_tx, _)) => {
+                                    client = new_client;
+                                    tx = new_tx;
+                                    messages = new_messages;
+                                    confirm_tx = new_confirm_tx;
+                                    send_files_shutdown = Shutdown::new();
+                                    is_first_connect = false;
+                                    ping_interval = tokio::time::interval(PING_INTERVAL);
+                                    let _ = Self::send_msg_to_stream(
+                                        sender_stream_tx,
+                                        SenderInteractionMessage::Message("Reconnected successfully".to_string()),
+                                    )
+                                    .await;
+                                    continue;
+                                }
+                                Err(_) => continue,
+                            }
+                        }
+                    }
                 }
             };
 
@@ -396,13 +468,22 @@ impl FlashCatSender {
                     )
                     .await?;
                 }
-                RelayMessage::Joined(_) => (),
+                RelayMessage::Joined(_) => {
+                    // After reconnection, send ResumeRequest instead of waiting for Ready
+                    if !is_first_connect {
+                        send_msg_to_relay(
+                            &tx,
+                            RelayMessage::Sender(SenderUpdate {
+                                sender_message: Some(SenderMessage::ResumeRequest(flash_cat_common::proto::ResumeRequest {})),
+                            }),
+                        )
+                        .await?;
+                    }
+                }
                 RelayMessage::Ready(ready) => {
                     if ready.local_relay {
-                        // close public relay
                         public_or_specify_shutdown.shutdown();
                     } else {
-                        // close local relay
                         local_relay_shutdown.shutdown();
                     }
                     send_msg_to_relay(
@@ -432,17 +513,19 @@ impl FlashCatSender {
                                 if let Ok(confirm) = Confirm::try_from(share_confirm) {
                                     match confirm {
                                         Confirm::Accept => {
-                                            // send files
                                             let encryptor = encryptor.clone();
                                             let file_collector = file_collector.clone();
                                             let tx = tx.clone();
                                             let sender_stream_tx = sender_stream_tx.clone();
                                             let notify_rx = confirm_rx.clone();
+                                            let cancel = send_files_shutdown.clone();
                                             tokio::spawn(async move {
-                                                if let Err(err) = Self::send_files(encryptor, tx, file_collector, notify_rx, &sender_stream_tx).await {
+                                                if let Err(err) =
+                                                    Self::send_files(encryptor, tx, file_collector, notify_rx, &sender_stream_tx, cancel, None).await
+                                                {
                                                     let _ = Self::send_msg_to_stream(
                                                         &sender_stream_tx,
-                                                        SenderInteractionMessage::Error(format!("send files error {}", err.to_string())),
+                                                        SenderInteractionMessage::Error(format!("send files error {}", err)),
                                                     )
                                                     .await;
                                                 }
@@ -463,6 +546,38 @@ impl FlashCatSender {
                             }
                             ReceiverMessage::FileConfirm(file_confirm) => {
                                 confirm_tx.send(file_confirm).await?;
+                            }
+                            ReceiverMessage::ResumeState(resume_state) => {
+                                // Receiver responded with file progress - start resume send_files
+                                let mut resume_progress = std::collections::HashMap::new();
+                                for fp in resume_state.files {
+                                    resume_progress.insert(fp.file_id, (fp.received_bytes, fp.completed));
+                                }
+                                let encryptor = encryptor.clone();
+                                let file_collector = file_collector.clone();
+                                let tx = tx.clone();
+                                let sender_stream_tx = sender_stream_tx.clone();
+                                let notify_rx = confirm_rx.clone();
+                                let cancel = send_files_shutdown.clone();
+                                tokio::spawn(async move {
+                                    if let Err(err) = Self::send_files(
+                                        encryptor,
+                                        tx,
+                                        file_collector,
+                                        notify_rx,
+                                        &sender_stream_tx,
+                                        cancel,
+                                        Some(resume_progress),
+                                    )
+                                    .await
+                                    {
+                                        let _ = Self::send_msg_to_stream(
+                                            &sender_stream_tx,
+                                            SenderInteractionMessage::Error(format!("send files error {}", err)),
+                                        )
+                                        .await;
+                                    }
+                                });
                             }
                         }
                     }
@@ -492,8 +607,97 @@ impl FlashCatSender {
         file_collector: Arc<FileCollector>,
         notify: async_channel::Receiver<FileConfirm>,
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
+        cancel: Shutdown,
+        resume_progress: Option<std::collections::HashMap<u64, (u64, bool)>>,
     ) -> Result<()> {
         for send_file in file_collector.files.iter() {
+            // Check cancellation
+            if cancel.is_terminated() {
+                return Ok(());
+            }
+
+            // If resuming, skip completed files and set position for partial files
+            if let Some(ref progress) = resume_progress {
+                if let Some(&(received_bytes, completed)) = progress.get(&send_file.file_id) {
+                    if completed {
+                        // File already fully received, skip it
+                        continue;
+                    }
+                    if received_bytes > 0 && !send_file.empty_dir {
+                        // Resume from the received position
+                        // Notify sender_stream about resuming
+                        let _ = Self::send_msg_to_stream(
+                            sender_stream_tx,
+                            SenderInteractionMessage::Message(format!("Resuming file {} from {}", send_file.name, received_bytes)),
+                        )
+                        .await;
+
+                        // Send BreakPoint to tell receiver we'll resume from this position
+                        send_msg_to_relay(
+                            &tx,
+                            RelayMessage::Sender(SenderUpdate {
+                                sender_message: Some(SenderMessage::BreakPoint(BreakPoint {
+                                    file_id: send_file.file_id,
+                                    position: received_bytes,
+                                })),
+                            }),
+                        )
+                        .await?;
+
+                        // Send file data from the break point
+                        let mut read_file = File::open(send_file.access_path.as_str()).await?;
+                        read_file.seek(SeekFrom::Start(received_bytes)).await?;
+                        let mut position = received_bytes;
+                        loop {
+                            if cancel.is_terminated() {
+                                return Ok(());
+                            }
+                            let mut buffer = BytesMut::with_capacity(SEND_BUFF_SIZE);
+                            let read_length = read_file.read_buf(&mut buffer).await?;
+                            if read_length == 0 {
+                                send_msg_to_relay(
+                                    &tx,
+                                    RelayMessage::Sender(SenderUpdate {
+                                        sender_message: Some(SenderMessage::FileDone(FileDone {
+                                            file_id: send_file.file_id,
+                                        })),
+                                    }),
+                                )
+                                .await?;
+                                Self::send_msg_to_stream(
+                                    sender_stream_tx,
+                                    SenderInteractionMessage::FileProgressFinish(send_file.file_id),
+                                )
+                                .await?;
+                                break;
+                            }
+                            send_msg_to_relay(
+                                &tx,
+                                RelayMessage::Sender(SenderUpdate {
+                                    sender_message: Some(SenderMessage::FileData(FileData {
+                                        file_id: send_file.file_id,
+                                        data: Bytes::from(encryptor.encrypt(buffer.as_ref())?),
+                                    })),
+                                }),
+                            )
+                            .await?;
+                            position += read_length as u64;
+                            Self::send_msg_to_stream(
+                                sender_stream_tx,
+                                SenderInteractionMessage::FileProgress(Progress {
+                                    file_id: send_file.file_id,
+                                    position,
+                                }),
+                            )
+                            .await?;
+                        }
+                        continue;
+                    }
+                }
+                // File not in progress map — it hasn't been started yet, send normally below
+            }
+
+            // Normal send flow (first connect or file not yet started)
             send_msg_to_relay(
                 &tx,
                 RelayMessage::Sender(SenderUpdate {
@@ -568,6 +772,9 @@ impl FlashCatSender {
             let mut read_file = File::open(send_file.access_path.as_str()).await?;
             read_file.seek(SeekFrom::Start(position)).await?;
             loop {
+                if cancel.is_terminated() {
+                    return Ok(());
+                }
                 let mut buffer = BytesMut::with_capacity(SEND_BUFF_SIZE);
                 let read_length = read_file.read_buf(&mut buffer).await?;
                 if read_length == 0 {

@@ -54,18 +54,16 @@ impl RelayService for GrpcServer {
                 let mut sender_local_relay = None;
 
                 match character {
-                    Character::Sender => match self.0.lookup(&session_code) {
-                        Some(_) => return Err(Status::already_exists("duplicate session_code")),
-                        None => {
-                            debug!("new sender({session_code}) incoming");
-                            let metadata = Metadata {
-                                encrypted_share_code: id.encrypted_share_code,
-                                sender_local_relay: request.sender_local_relay,
-                            };
-                            let session = Arc::new(Session::new(metadata));
-                            self.0.insert(&session_code, session.clone());
-                        }
-                    },
+                    Character::Sender => {
+                        // Allow re-join: replace existing session for reconnection support
+                        debug!("new sender({session_code}) incoming");
+                        let metadata = Metadata {
+                            encrypted_share_code: id.encrypted_share_code,
+                            sender_local_relay: request.sender_local_relay,
+                        };
+                        let session = Arc::new(Session::new(metadata));
+                        self.0.insert(&session_code, session.clone());
+                    }
                     Character::Receiver => match self.0.lookup(&session_code) {
                         None => {
                             return Err(Status::not_found("Not found, Please check share code."));

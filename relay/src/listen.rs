@@ -4,7 +4,7 @@ use anyhow::Result;
 use tonic::transport::Server as TonicServer;
 
 use flash_cat_common::{
-    consts::{DEFAULT_HTTP2_KEEPALIVE_INTERVAL, DEFAULT_HTTP2_KEEPALIVE_TIMEOUT, DEFAULT_TCP_KEEPALIVE},
+    consts::{DEFAULT_HTTP2_KEEPALIVE_INTERVAL, DEFAULT_HTTP2_KEEPALIVE_TIMEOUT, DEFAULT_TCP_KEEPALIVE, INITIAL_WINDOW_SIZE},
     proto::{FILE_DESCRIPTOR_SET, relay_service_server::RelayServiceServer},
 };
 
@@ -20,6 +20,8 @@ pub(crate) async fn start_server(
         .http2_keepalive_timeout(Some(DEFAULT_HTTP2_KEEPALIVE_TIMEOUT))
         .http2_adaptive_window(Some(true)) // enable adaptive window size
         .tcp_keepalive(Some(DEFAULT_TCP_KEEPALIVE)) // set TCP keepalive
+        .initial_connection_window_size(Some(INITIAL_WINDOW_SIZE))
+        .initial_stream_window_size(Some(INITIAL_WINDOW_SIZE))
         .add_service(RelayServiceServer::new(GrpcServer::new(state)))
         .add_service(tonic_reflection::server::Builder::configure().register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET).build_v1()?)
         .serve_with_shutdown(addr, signal)
