@@ -258,12 +258,67 @@ jobs:
           sha256sum * > checksums.txt
           cat checksums.txt
 
+      - name: Generate Release Notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 1. Fetch auto-generated release notes from GitHub
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            /repos/${{ github.repository }}/releases/generate-notes \
+            -f tag_name="${GITHUB_REF#refs/tags/}" \
+            -f target_commitish="${GITHUB_SHA}" \
+            -q .body > gh_notes.md || echo "" > gh_notes.md
+
+          # 2. Parse and group commits using Python
+          python3 -c '
+          import os
+
+          try:
+              lines = open("gh_notes.md").read().split("\n")
+          except Exception:
+              lines = []
+
+          features, fixes, opts = [], [], []
+
+          for line in lines:
+              if line.strip().startswith("* "):
+                  content = line[2:].strip()
+                  # Remove the trailing " by @user in https..."
+                  if " by @" in content:
+                      content = content.split(" by @")[0]
+
+                  lower_content = content.lower()
+                  if lower_content.startswith("feat:"):
+                      msg = content.split(":", 1)[1].strip()
+                      if msg: features.append("- " + msg[0].upper() + msg[1:])
+                  elif lower_content.startswith("fix:"):
+                      msg = content.split(":", 1)[1].strip()
+                      if msg: fixes.append("- " + msg[0].upper() + msg[1:])
+                  elif lower_content.startswith("perf:") or lower_content.startswith("opt:"):
+                      msg = content.split(":", 1)[1].strip()
+                      if msg: opts.append("- " + msg[0].upper() + msg[1:])
+
+          with open("grouped_notes.md", "w", encoding="utf-8") as f:
+              if features:
+                  f.write("### ✨ New Features\n\n" + "\n".join(features) + "\n\n")
+              if fixes:
+                  f.write("### 🐛 Bug Fixes\n\n" + "\n".join(fixes) + "\n\n")
+              if opts:
+                  f.write("### 🔧 Optimizations\n\n" + "\n".join(opts) + "\n\n")
+          '
+
+          # 3. Rename grouped notes to release notes
+          mv grouped_notes.md release_notes.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             release/*
-          generate_release_notes: true
+          body_path: release_notes.md
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
         env:
