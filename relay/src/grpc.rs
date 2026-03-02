@@ -122,7 +122,7 @@ impl RelayService for GrpcServer {
             None => return Err(Status::invalid_argument("missing first message")),
         };
 
-        let (tx, rx) = mpsc::channel(1024);
+        let (tx, rx) = mpsc::channel(32);
 
         let (session, character) = match first_update.relay_message {
             Some(RelayMessage::Join(join)) => {

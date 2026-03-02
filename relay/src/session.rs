@@ -27,8 +27,8 @@ pub struct SessionUserPair {
 
 impl SessionUserPair {
     pub fn new() -> Self {
-        let (sharer_update_tx, sharer_update_rx) = async_channel::bounded(256);
-        let (recipient_update_tx, recipient_update_rx) = async_channel::bounded(256);
+        let (sharer_update_tx, sharer_update_rx) = async_channel::bounded(32);
+        let (recipient_update_tx, recipient_update_rx) = async_channel::bounded(32);
         Self {
             sharer_update_tx,
             sharer_update_rx,

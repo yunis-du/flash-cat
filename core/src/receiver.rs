@@ -80,7 +80,7 @@ impl FlashCatReceiver {
     }
 
     pub async fn start(self: Arc<Self>) -> Result<ReceiverStream> {
-        let (receiver_stream_tx, mut receiver_stream_rx) = mpsc::channel(1024);
+        let (receiver_stream_tx, mut receiver_stream_rx) = mpsc::channel(128);
 
         if self.specify_relay.is_some() {
             let specify_relay = self.specify_relay.clone().unwrap();
@@ -273,7 +273,7 @@ impl FlashCatReceiver {
     )> {
         let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
 
-        let (tx, rx) = mpsc::channel(1024);
+        let (tx, rx) = mpsc::channel(32);
 
         let join = RelayMessage::Join(Id {
             encrypted_share_code: encryptor.encrypt_share_code_bytes(),
@@ -680,7 +680,7 @@ impl RecvFile {
         &mut self,
         data: &[u8],
     ) -> Result<()> {
-        self.file.write(data).await?;
+        self.file.write_all(data).await?;
         let data_len = data.len() as u64;
         self.progress += data_len;
         Ok(())
