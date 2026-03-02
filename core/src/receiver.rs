@@ -503,9 +503,9 @@ impl FlashCatReceiver {
                                 .await?;
 
                                 if absolute_path.exists() {
-                                    let recv_file = RecvFile::new(fs::File::options().write(true).read(true).open(&absolute_path).await?);
+                                    let recv_file_len = fs::metadata(&absolute_path).await?.len();
 
-                                    let recv_file_len = recv_file.file.metadata().await?.len();
+                                    let recv_file = RecvFile::new(fs::File::options().write(true).read(true).open(&absolute_path).await?);
                                     recv_files.insert(new_file_req.file_id, recv_file);
 
                                     if recv_file_len == new_file_req.total_size {
@@ -541,11 +541,10 @@ impl FlashCatReceiver {
                                     if !parent.exists() && !parent.to_string_lossy().is_empty() {
                                         fs::create_dir_all(parent).await?;
                                     }
-                                    let recv_file = RecvFile::new(fs::File::create(&absolute_path).await?);
+                                    let file_instance = fs::File::create(&absolute_path).await?;
                                     #[cfg(unix)]
                                     {
-                                        recv_file
-                                            .file
+                                        file_instance
                                             .set_permissions(if new_file_req.file_mode > 0 {
                                                 std::fs::Permissions::from_mode(new_file_req.file_mode)
                                             } else {
@@ -554,7 +553,9 @@ impl FlashCatReceiver {
                                             })
                                             .await?;
                                     }
-                                    recv_file.file.set_len(new_file_req.total_size).await?;
+                                    file_instance.set_len(new_file_req.total_size).await?;
+
+                                    let recv_file = RecvFile::new(file_instance);
                                     recv_files.insert(new_file_req.file_id, recv_file);
 
                                     send_msg_to_relay(&tx, accept_msg).await?;
@@ -565,8 +566,7 @@ impl FlashCatReceiver {
                                     bail!("receive file failed");
                                 }
                                 let recv_file = recv_files.get_mut(&break_point.file_id).unwrap();
-                                recv_file.progress = break_point.position;
-                                recv_file.file.seek(SeekFrom::Start(break_point.position)).await?;
+                                recv_file.seek(break_point.position).await?;
                             }
                             SenderMessage::FileData(file_data) => {
                                 if !recv_files.contains_key(&file_data.file_id) {
@@ -580,7 +580,7 @@ impl FlashCatReceiver {
                                         bail!(format!("decrypt failed: {e}"));
                                     }
                                 };
-                                recv_file.write(&data).await?;
+                                recv_file.write(data).await?;
                                 Self::send_msg_to_stream(
                                     receiver_stream_tx,
                                     ReceiverInteractionMessage::FileProgress(Progress {
@@ -591,7 +591,11 @@ impl FlashCatReceiver {
                                 .await?;
                             }
                             SenderMessage::FileDone(file_done) => {
-                                recv_files.remove(&file_done.file_id); // drop file recycle file descriptors
+                                if !recv_files.contains_key(&file_done.file_id) {
+                                    bail!("receive file failed");
+                                }
+                                let mut recv_file = recv_files.remove(&file_done.file_id).unwrap();
+                                recv_file.finish().await?; // notify and wait for writer Task
                                 Self::send_msg_to_stream(
                                     receiver_stream_tx,
                                     ReceiverInteractionMessage::FileProgressFinish(file_done.file_id),
@@ -663,26 +667,73 @@ impl FlashCatReceiver {
     }
 }
 
+enum FileWriteCommand {
+    Write(Vec<u8>),
+    Seek(u64),
+    Finish,
+}
+
 struct RecvFile {
-    file: fs::File,
+    tx: tokio::sync::mpsc::Sender<FileWriteCommand>,
+    writer_handle: Option<tokio::task::JoinHandle<Result<()>>>,
     progress: u64,
 }
 
 impl RecvFile {
-    fn new(file: fs::File) -> Self {
+    fn new(mut file: fs::File) -> Self {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<FileWriteCommand>(1024);
+
+        let writer_handle = tokio::spawn(async move {
+            while let Some(cmd) = rx.recv().await {
+                match cmd {
+                    FileWriteCommand::Write(data) => {
+                        file.write_all(&data).await?;
+                    }
+                    FileWriteCommand::Seek(position) => {
+                        file.seek(SeekFrom::Start(position)).await?;
+                    }
+                    FileWriteCommand::Finish => {
+                        file.flush().await?;
+                        break;
+                    }
+                }
+            }
+            Ok(())
+        });
+
         Self {
-            file,
+            tx,
+            writer_handle: Some(writer_handle),
             progress: 0,
         }
     }
 
     async fn write(
         &mut self,
-        data: &[u8],
+        data: Vec<u8>,
     ) -> Result<()> {
-        self.file.write_all(data).await?;
         let data_len = data.len() as u64;
+        self.tx.send(FileWriteCommand::Write(data)).await?;
         self.progress += data_len;
+        Ok(())
+    }
+
+    async fn seek(
+        &mut self,
+        position: u64,
+    ) -> Result<()> {
+        self.tx.send(FileWriteCommand::Seek(position)).await?;
+        self.progress = position;
+        Ok(())
+    }
+
+    async fn finish(&mut self) -> Result<()> {
+        self.tx.send(FileWriteCommand::Finish).await?;
+        if let Some(handle) = self.writer_handle.take() {
+            if let Err(e) = handle.await {
+                bail!("writer task failed: {}", e);
+            }
+        }
         Ok(())
     }
 

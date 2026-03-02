@@ -33,5 +33,5 @@ pub const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
 /// Default connect timeout.
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Initial HTTP/2 connection and stream window size (2MB).
+/// Initial HTTP/2 connection and stream window size (2MiB).
 pub const INITIAL_WINDOW_SIZE: u32 = 2 * 1024 * 1024;
