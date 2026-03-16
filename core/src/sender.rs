@@ -376,7 +376,7 @@ impl FlashCatSender {
         public_or_specify_shutdown: Shutdown,
         local_relay_shutdown: Shutdown,
     ) -> Result<()> {
-        let (mut client, mut tx, mut messages, mut confirm_tx, confirm_rx) = Self::establish_channel(&encryptor, &endpoint).await?;
+        let (mut client, mut tx, mut messages, mut confirm_tx, mut confirm_rx) = Self::establish_channel(&encryptor, &endpoint).await?;
 
         let shutdown = match relay_type {
             RelayType::Local => local_relay_shutdown.clone(),
@@ -413,48 +413,63 @@ impl FlashCatSender {
                             }
                         }
                         Some(Err(_)) | None => {
-                            // Stream disconnected - attempt reconnect
                             if shutdown.is_terminated() {
                                 return Ok(());
                             }
-                            // Cancel the old send_files task
                             send_files_shutdown.shutdown();
 
-                            if !crate::should_retry(reconnect_attempt) {
-                                bail!("max reconnect retries exceeded");
-                            }
-                            let delay = crate::reconnect_delay(reconnect_attempt);
+                            let result = loop {
+                                if !crate::should_retry(reconnect_attempt) {
+                                    bail!("max reconnect retries exceeded");
+                                }
+                                let delay = crate::reconnect_delay(reconnect_attempt);
+                                let _ = Self::send_msg_to_stream(
+                                    sender_stream_tx,
+                                    SenderInteractionMessage::Message(format!(
+                                        "Connection lost, reconnecting in {}s... (attempt {}/{})",
+                                        delay.as_secs(),
+                                        reconnect_attempt + 1,
+                                        flash_cat_common::consts::MAX_RECONNECT_RETRIES
+                                    )),
+                                )
+                                .await;
+                                tokio::time::sleep(delay).await;
+                                reconnect_attempt += 1;
+
+                                if shutdown.is_terminated() {
+                                    return Ok(());
+                                }
+
+                                match Self::establish_channel(&encryptor, &endpoint).await {
+                                    Ok(result) => break result,
+                                    Err(e) => {
+                                        let _ = Self::send_msg_to_stream(
+                                            sender_stream_tx,
+                                            SenderInteractionMessage::Message(format!(
+                                                "Reconnect failed: {e}"
+                                            )),
+                                        )
+                                        .await;
+                                    }
+                                }
+                            };
+
+                            let (new_client, new_tx, new_messages, new_confirm_tx, new_confirm_rx) = result;
+                            client = new_client;
+                            tx = new_tx;
+                            messages = new_messages;
+                            confirm_tx = new_confirm_tx;
+                            confirm_rx = new_confirm_rx;
+                            send_files_shutdown = Shutdown::new();
+                            is_first_connect = false;
+                            reconnect_attempt = 0;
+                            ping_interval = tokio::time::interval(PING_INTERVAL);
                             let _ = Self::send_msg_to_stream(
                                 sender_stream_tx,
-                                SenderInteractionMessage::Message(format!(
-                                    "Connection lost, reconnecting in {}s... (attempt {}/{})",
-                                    delay.as_secs(),
-                                    reconnect_attempt + 1,
-                                    flash_cat_common::consts::MAX_RECONNECT_RETRIES
-                                )),
+                                SenderInteractionMessage::Message("Reconnected successfully".to_string()),
                             )
                             .await;
-                            tokio::time::sleep(delay).await;
-                            reconnect_attempt += 1;
-
-                            match Self::establish_channel(&encryptor, &endpoint).await {
-                                Ok((new_client, new_tx, new_messages, new_confirm_tx, _)) => {
-                                    client = new_client;
-                                    tx = new_tx;
-                                    messages = new_messages;
-                                    confirm_tx = new_confirm_tx;
-                                    send_files_shutdown = Shutdown::new();
-                                    is_first_connect = false;
-                                    ping_interval = tokio::time::interval(PING_INTERVAL);
-                                    let _ = Self::send_msg_to_stream(
-                                        sender_stream_tx,
-                                        SenderInteractionMessage::Message("Reconnected successfully".to_string()),
-                                    )
-                                    .await;
-                                    continue;
-                                }
-                                Err(_) => continue,
-                            }
+                            continue;
                         }
                     }
                 }

@@ -412,42 +412,58 @@ impl FlashCatReceiver {
                             }
                         }
                         Some(Err(_)) | None => {
-                            // Stream disconnected - attempt reconnect
                             if shutdown.is_terminated() {
                                 return Ok(());
                             }
-                            if !crate::should_retry(reconnect_attempt) {
-                                bail!("max reconnect retries exceeded");
-                            }
-                            let delay = crate::reconnect_delay(reconnect_attempt);
+
+                            let result = loop {
+                                if !crate::should_retry(reconnect_attempt) {
+                                    bail!("max reconnect retries exceeded");
+                                }
+                                let delay = crate::reconnect_delay(reconnect_attempt);
+                                let _ = Self::send_msg_to_stream(
+                                    receiver_stream_tx,
+                                    ReceiverInteractionMessage::Message(format!(
+                                        "Connection lost, reconnecting in {}s... (attempt {}/{})",
+                                        delay.as_secs(),
+                                        reconnect_attempt + 1,
+                                        flash_cat_common::consts::MAX_RECONNECT_RETRIES
+                                    )),
+                                )
+                                .await;
+                                tokio::time::sleep(delay).await;
+                                reconnect_attempt += 1;
+
+                                if shutdown.is_terminated() {
+                                    return Ok(());
+                                }
+
+                                match Self::establish_channel(&encryptor, &endpoint).await {
+                                    Ok(result) => break result,
+                                    Err(e) => {
+                                        let _ = Self::send_msg_to_stream(
+                                            receiver_stream_tx,
+                                            ReceiverInteractionMessage::Message(format!(
+                                                "Reconnect failed: {e}"
+                                            )),
+                                        )
+                                        .await;
+                                    }
+                                }
+                            };
+
+                            let (new_client, new_tx, new_messages) = result;
+                            client = new_client;
+                            tx = new_tx;
+                            messages = new_messages;
+                            reconnect_attempt = 0;
+                            ping_interval = tokio::time::interval(PING_INTERVAL);
                             let _ = Self::send_msg_to_stream(
                                 receiver_stream_tx,
-                                ReceiverInteractionMessage::Message(format!(
-                                    "Connection lost, reconnecting in {}s... (attempt {}/{})",
-                                    delay.as_secs(),
-                                    reconnect_attempt + 1,
-                                    flash_cat_common::consts::MAX_RECONNECT_RETRIES
-                                )),
+                                ReceiverInteractionMessage::Message("Reconnected successfully".to_string()),
                             )
                             .await;
-                            tokio::time::sleep(delay).await;
-                            reconnect_attempt += 1;
-
-                            match Self::establish_channel(&encryptor, &endpoint).await {
-                                Ok((new_client, new_tx, new_messages)) => {
-                                    client = new_client;
-                                    tx = new_tx;
-                                    messages = new_messages;
-                                    ping_interval = tokio::time::interval(PING_INTERVAL);
-                                    let _ = Self::send_msg_to_stream(
-                                        receiver_stream_tx,
-                                        ReceiverInteractionMessage::Message("Reconnected successfully".to_string()),
-                                    )
-                                    .await;
-                                    continue;
-                                }
-                                Err(_) => continue,
-                            }
+                            continue;
                         }
                     }
                 }
