@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::Path, pin::Pin, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, path::Path, pin::Pin, sync::Arc, time::Duration};
 
 use anyhow::{Result, bail};
 use bytes::{Bytes, BytesMut};
@@ -6,7 +6,7 @@ use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncSeekExt, SeekFrom},
     signal::ctrl_c,
-    sync::mpsc,
+    sync::{mpsc, oneshot, Semaphore},
 };
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tonic::transport::Endpoint;
@@ -21,7 +21,7 @@ use flash_cat_common::{
         relay_service_client::RelayServiceClient, relay_update::RelayMessage, sender_update::SenderMessage,
     },
     utils::{
-        fs::{FileCollector, collect_files, is_idr, paths_exist, remove_files, zip_folder},
+        fs::{FileCollector, FileInfo, collect_files, is_idr, paths_exist, remove_files, zip_folder},
         net::{find_available_port, get_local_ip, net_scout::NetScout},
     },
 };
@@ -31,6 +31,9 @@ use crate::{PING_INTERVAL, Progress, RelayType, SenderInteractionMessage, get_en
 
 /// Broadcast local relay addr timeout.
 pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Maximum number of files to transfer concurrently.
+pub const MAX_CONCURRENT_FILES: usize = 3;
 
 /// Sender stream
 pub type SenderStream = Pin<Box<dyn Stream<Item = SenderInteractionMessage> + Send>>;
@@ -563,8 +566,7 @@ impl FlashCatSender {
                                 confirm_tx.send(file_confirm).await?;
                             }
                             ReceiverMessage::ResumeState(resume_state) => {
-                                // Receiver responded with file progress - start resume send_files
-                                let mut resume_progress = std::collections::HashMap::new();
+                                let mut resume_progress = HashMap::new();
                                 for fp in resume_state.files {
                                     resume_progress.insert(fp.file_id, (fp.received_bytes, fp.completed));
                                 }
@@ -616,6 +618,13 @@ impl FlashCatSender {
         }
     }
 
+    fn extract_confirm_file_id(confirm: &FileConfirm) -> Option<u64> {
+        confirm.confirm_message.as_ref().map(|msg| match msg {
+            ConfirmMessage::NewFileConfirm(c) => c.file_id,
+            ConfirmMessage::BreakPointConfirm(c) => c.file_id,
+        })
+    }
+
     async fn send_files(
         encryptor: Arc<Encryptor>,
         tx: mpsc::Sender<RelayUpdate>,
@@ -623,216 +632,285 @@ impl FlashCatSender {
         notify: async_channel::Receiver<FileConfirm>,
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
         cancel: Shutdown,
-        resume_progress: Option<std::collections::HashMap<u64, (u64, bool)>>,
+        resume_progress: Option<HashMap<u64, (u64, bool)>>,
     ) -> Result<()> {
-        for send_file in file_collector.files.iter() {
-            // Check cancellation
-            if cancel.is_terminated() {
-                return Ok(());
-            }
+        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_FILES));
+        let confirm_waiters: Arc<std::sync::Mutex<HashMap<u64, oneshot::Sender<FileConfirm>>>> =
+            Arc::new(std::sync::Mutex::new(HashMap::new()));
 
-            // If resuming, skip completed files and set position for partial files
-            if let Some(ref progress) = resume_progress {
-                if let Some(&(received_bytes, completed)) = progress.get(&send_file.file_id) {
-                    if completed {
-                        // File already fully received, skip it
-                        continue;
-                    }
-                    if received_bytes > 0 && !send_file.empty_dir {
-                        // Resume from the received position
-                        // Notify sender_stream about resuming
-                        let _ = Self::send_msg_to_stream(
-                            sender_stream_tx,
-                            SenderInteractionMessage::Message(format!("Resuming file {} from {}", send_file.name, received_bytes)),
-                        )
-                        .await;
-
-                        // Send BreakPoint to tell receiver we'll resume from this position
-                        send_msg_to_relay(
-                            &tx,
-                            RelayMessage::Sender(SenderUpdate {
-                                sender_message: Some(SenderMessage::BreakPoint(BreakPoint {
-                                    file_id: send_file.file_id,
-                                    position: received_bytes,
-                                })),
-                            }),
-                        )
-                        .await?;
-
-                        // Send file data from the break point
-                        let mut read_file = File::open(send_file.access_path.as_str()).await?;
-                        read_file.seek(SeekFrom::Start(received_bytes)).await?;
-                        let mut position = received_bytes;
-                        loop {
-                            if cancel.is_terminated() {
-                                return Ok(());
-                            }
-                            let mut buffer = BytesMut::with_capacity(SEND_BUFF_SIZE);
-                            let read_length = read_file.read_buf(&mut buffer).await?;
-                            if read_length == 0 {
-                                send_msg_to_relay(
-                                    &tx,
-                                    RelayMessage::Sender(SenderUpdate {
-                                        sender_message: Some(SenderMessage::FileDone(FileDone {
-                                            file_id: send_file.file_id,
-                                        })),
-                                    }),
-                                )
-                                .await?;
-                                Self::send_msg_to_stream(
-                                    sender_stream_tx,
-                                    SenderInteractionMessage::FileProgressFinish(send_file.file_id),
-                                )
-                                .await?;
-                                break;
-                            }
-                            send_msg_to_relay(
-                                &tx,
-                                RelayMessage::Sender(SenderUpdate {
-                                    sender_message: Some(SenderMessage::FileData(FileData {
-                                        file_id: send_file.file_id,
-                                        data: Bytes::from(encryptor.encrypt(buffer.as_ref())?),
-                                    })),
-                                }),
-                            )
-                            .await?;
-                            position += read_length as u64;
-                            Self::send_msg_to_stream(
-                                sender_stream_tx,
-                                SenderInteractionMessage::FileProgress(Progress {
-                                    file_id: send_file.file_id,
-                                    position,
-                                }),
-                            )
-                            .await?;
-                        }
-                        continue;
-                    }
-                }
-                // File not in progress map — it hasn't been started yet, send normally below
-            }
-
-            // Normal send flow (first connect or file not yet started)
-            send_msg_to_relay(
-                &tx,
-                RelayMessage::Sender(SenderUpdate {
-                    sender_message: Some(SenderMessage::NewFileRequest(NewFileRequest {
-                        file_id: send_file.file_id,
-                        filename: send_file.name.clone(),
-                        #[cfg(unix)]
-                        file_mode: send_file.mode,
-                        #[cfg(windows)]
-                        file_mode: 0,
-                        relative_path: send_file.relative_path.clone(),
-                        total_size: send_file.size,
-                        is_empty_dir: send_file.empty_dir,
-                    })),
-                }),
-            )
-            .await?;
-
-            let file_confirm = notify.recv().await?;
-
-            let mut position = 0;
-
-            if let Some(confirm_message) = file_confirm.confirm_message {
-                match confirm_message {
-                    ConfirmMessage::NewFileConfirm(new_file_confirm) => {
-                        if new_file_confirm.file_id != send_file.file_id {
-                            Self::send_msg_to_stream(
-                                sender_stream_tx,
-                                SenderInteractionMessage::Error("File order is wrong".to_string()),
-                            )
-                            .await?;
-                            continue;
-                        }
-                        if new_file_confirm.confirm == Confirm::Reject.into() {
-                            Self::send_msg_to_stream(
-                                sender_stream_tx,
-                                SenderInteractionMessage::ContinueFile(new_file_confirm.file_id),
-                            )
-                            .await?;
-                            continue;
-                        }
-                    }
-                    ConfirmMessage::BreakPointConfirm(break_point_confirm) => {
-                        if break_point_confirm.file_id != send_file.file_id {
-                            Self::send_msg_to_stream(
-                                sender_stream_tx,
-                                SenderInteractionMessage::Error("File order is wrong".to_string()),
-                            )
-                            .await?;
-                            continue;
-                        }
-                        if break_point_confirm.confirm == Confirm::Accept.into() {
-                            position = break_point_confirm.position;
-                            send_msg_to_relay(
-                                &tx,
-                                RelayMessage::Sender(SenderUpdate {
-                                    sender_message: Some(SenderMessage::BreakPoint(BreakPoint {
-                                        file_id: send_file.file_id,
-                                        position,
-                                    })),
-                                }),
-                            )
-                            .await?;
-                        }
-                    }
-                }
-            }
-
-            if send_file.empty_dir {
-                continue;
-            }
-            let mut read_file = File::open(send_file.access_path.as_str()).await?;
-            read_file.seek(SeekFrom::Start(position)).await?;
+        let confirm_waiters_ref = confirm_waiters.clone();
+        let cancel_ref = cancel.clone();
+        let dispatcher = tokio::spawn(async move {
             loop {
-                if cancel.is_terminated() {
-                    return Ok(());
+                if cancel_ref.is_terminated() {
+                    return;
                 }
-                let mut buffer = BytesMut::with_capacity(SEND_BUFF_SIZE);
-                let read_length = read_file.read_buf(&mut buffer).await?;
-                if read_length == 0 {
-                    send_msg_to_relay(
-                        &tx,
-                        RelayMessage::Sender(SenderUpdate {
-                            sender_message: Some(SenderMessage::FileDone(FileDone {
-                                file_id: send_file.file_id,
-                            })),
-                        }),
-                    )
-                    .await?;
-                    Self::send_msg_to_stream(
-                        sender_stream_tx,
-                        SenderInteractionMessage::FileProgressFinish(send_file.file_id),
-                    )
-                    .await?;
-                    break;
+                match notify.recv().await {
+                    Ok(file_confirm) => {
+                        if let Some(file_id) = Self::extract_confirm_file_id(&file_confirm) {
+                            let sender = confirm_waiters_ref.lock().unwrap().remove(&file_id);
+                            if let Some(sender) = sender {
+                                let _ = sender.send(file_confirm);
+                            }
+                        }
+                    }
+                    Err(_) => return,
                 }
-                send_msg_to_relay(
+            }
+        });
+
+        let mut tasks = Vec::new();
+
+        for send_file in file_collector.files.iter() {
+            if cancel.is_terminated() {
+                break;
+            }
+
+            if let Some(ref progress) = resume_progress {
+                if let Some(&(_, completed)) = progress.get(&send_file.file_id) {
+                    if completed {
+                        continue;
+                    }
+                }
+            }
+
+            let file_resume = resume_progress
+                .as_ref()
+                .and_then(|p| p.get(&send_file.file_id).copied());
+
+            let permit = semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|e| anyhow::anyhow!("semaphore closed: {}", e))?;
+
+            let send_file = send_file.clone();
+            let encryptor = encryptor.clone();
+            let tx = tx.clone();
+            let sender_stream_tx = sender_stream_tx.clone();
+            let cancel = cancel.clone();
+            let confirm_waiters = confirm_waiters.clone();
+
+            let task = tokio::spawn(async move {
+                let result = Self::send_single_file(
+                    &send_file,
+                    &encryptor,
                     &tx,
+                    &sender_stream_tx,
+                    &cancel,
+                    &confirm_waiters,
+                    file_resume,
+                )
+                .await;
+                drop(permit);
+                result
+            });
+            tasks.push(task);
+        }
+
+        let mut first_error = None;
+        for task in tasks {
+            match task.await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    if first_error.is_none() {
+                        first_error = Some(e);
+                    }
+                }
+                Err(e) => {
+                    if first_error.is_none() {
+                        first_error = Some(anyhow::anyhow!("task panicked: {}", e));
+                    }
+                }
+            }
+        }
+
+        dispatcher.abort();
+
+        if let Some(e) = first_error {
+            return Err(e);
+        }
+
+        send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
+        Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::SendDone).await?;
+        Ok(())
+    }
+
+    async fn send_single_file(
+        send_file: &FileInfo,
+        encryptor: &Encryptor,
+        tx: &mpsc::Sender<RelayUpdate>,
+        sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
+        cancel: &Shutdown,
+        confirm_waiters: &std::sync::Mutex<HashMap<u64, oneshot::Sender<FileConfirm>>>,
+        file_resume: Option<(u64, bool)>,
+    ) -> Result<()> {
+        // Resume: partial file — send BreakPoint and stream remaining data
+        if let Some((received_bytes, _)) = file_resume {
+            if received_bytes > 0 && !send_file.empty_dir {
+                let _ = Self::send_msg_to_stream(
+                    sender_stream_tx,
+                    SenderInteractionMessage::Message(format!(
+                        "Resuming file {} from {}",
+                        send_file.name, received_bytes
+                    )),
+                )
+                .await;
+
+                send_msg_to_relay(
+                    tx,
                     RelayMessage::Sender(SenderUpdate {
-                        sender_message: Some(SenderMessage::FileData(FileData {
+                        sender_message: Some(SenderMessage::BreakPoint(BreakPoint {
                             file_id: send_file.file_id,
-                            data: Bytes::from(encryptor.encrypt(buffer.as_ref())?),
+                            position: received_bytes,
                         })),
                     }),
                 )
                 .await?;
-                position += read_length as u64;
-                Self::send_msg_to_stream(
-                    sender_stream_tx,
-                    SenderInteractionMessage::FileProgress(Progress {
-                        file_id: send_file.file_id,
-                        position,
+
+                Self::stream_file_data(send_file, encryptor, tx, sender_stream_tx, cancel, received_bytes).await?;
+                return Ok(());
+            }
+        }
+
+        // Normal flow: send NewFileRequest, wait for confirm, then stream data
+        let (confirm_tx, confirm_rx) = oneshot::channel();
+        confirm_waiters
+            .lock()
+            .unwrap()
+            .insert(send_file.file_id, confirm_tx);
+
+        send_msg_to_relay(
+            tx,
+            RelayMessage::Sender(SenderUpdate {
+                sender_message: Some(SenderMessage::NewFileRequest(NewFileRequest {
+                    file_id: send_file.file_id,
+                    filename: send_file.name.clone(),
+                    #[cfg(unix)]
+                    file_mode: send_file.mode,
+                    #[cfg(windows)]
+                    file_mode: 0,
+                    relative_path: send_file.relative_path.clone(),
+                    total_size: send_file.size,
+                    is_empty_dir: send_file.empty_dir,
+                })),
+            }),
+        )
+        .await?;
+
+        let file_confirm = confirm_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("confirm channel closed for file {}", send_file.file_id))?;
+
+        let mut position = 0;
+
+        if let Some(confirm_message) = file_confirm.confirm_message {
+            match confirm_message {
+                ConfirmMessage::NewFileConfirm(new_file_confirm) => {
+                    if new_file_confirm.file_id != send_file.file_id {
+                        Self::send_msg_to_stream(
+                            sender_stream_tx,
+                            SenderInteractionMessage::Error("File order is wrong".to_string()),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                    if new_file_confirm.confirm == Confirm::Reject.into() {
+                        Self::send_msg_to_stream(
+                            sender_stream_tx,
+                            SenderInteractionMessage::ContinueFile(new_file_confirm.file_id),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                }
+                ConfirmMessage::BreakPointConfirm(break_point_confirm) => {
+                    if break_point_confirm.file_id != send_file.file_id {
+                        Self::send_msg_to_stream(
+                            sender_stream_tx,
+                            SenderInteractionMessage::Error("File order is wrong".to_string()),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                    if break_point_confirm.confirm == Confirm::Accept.into() {
+                        position = break_point_confirm.position;
+                        send_msg_to_relay(
+                            tx,
+                            RelayMessage::Sender(SenderUpdate {
+                                sender_message: Some(SenderMessage::BreakPoint(BreakPoint {
+                                    file_id: send_file.file_id,
+                                    position,
+                                })),
+                            }),
+                        )
+                        .await?;
+                    }
+                }
+            }
+        }
+
+        if send_file.empty_dir {
+            return Ok(());
+        }
+
+        Self::stream_file_data(send_file, encryptor, tx, sender_stream_tx, cancel, position).await
+    }
+
+    async fn stream_file_data(
+        send_file: &FileInfo,
+        encryptor: &Encryptor,
+        tx: &mpsc::Sender<RelayUpdate>,
+        sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
+        cancel: &Shutdown,
+        start_position: u64,
+    ) -> Result<()> {
+        let mut read_file = File::open(send_file.access_path.as_str()).await?;
+        read_file.seek(SeekFrom::Start(start_position)).await?;
+        let mut position = start_position;
+        loop {
+            if cancel.is_terminated() {
+                return Ok(());
+            }
+            let mut buffer = BytesMut::with_capacity(SEND_BUFF_SIZE);
+            let read_length = read_file.read_buf(&mut buffer).await?;
+            if read_length == 0 {
+                send_msg_to_relay(
+                    tx,
+                    RelayMessage::Sender(SenderUpdate {
+                        sender_message: Some(SenderMessage::FileDone(FileDone {
+                            file_id: send_file.file_id,
+                        })),
                     }),
                 )
                 .await?;
+                Self::send_msg_to_stream(
+                    sender_stream_tx,
+                    SenderInteractionMessage::FileProgressFinish(send_file.file_id),
+                )
+                .await?;
+                return Ok(());
             }
+            send_msg_to_relay(
+                tx,
+                RelayMessage::Sender(SenderUpdate {
+                    sender_message: Some(SenderMessage::FileData(FileData {
+                        file_id: send_file.file_id,
+                        data: Bytes::from(encryptor.encrypt(buffer.as_ref())?),
+                    })),
+                }),
+            )
+            .await?;
+            position += read_length as u64;
+            Self::send_msg_to_stream(
+                sender_stream_tx,
+                SenderInteractionMessage::FileProgress(Progress {
+                    file_id: send_file.file_id,
+                    position,
+                }),
+            )
+            .await?;
         }
-        send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
-        Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::SendDone).await?;
-        Ok(())
     }
 
     pub fn get_file_collector(&self) -> Arc<FileCollector> {

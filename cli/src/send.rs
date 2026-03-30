@@ -1,10 +1,4 @@
-use std::{
-    env,
-    io::{Write, stdout},
-    path::PathBuf,
-    process,
-    sync::Arc,
-};
+use std::{env, path::PathBuf, process, sync::Arc};
 
 use anyhow::Result;
 use tokio_stream::StreamExt;
@@ -73,10 +67,14 @@ impl Send {
             println!("flash-cat recv {}", self.share_code);
         }
 
-        let mut progress = Progress::new(file_collector.num_files, file_collector.max_file_name_length);
+        let mut progress = Progress::new(
+            file_collector.num_files,
+            file_collector.max_file_name_length,
+            file_collector.total_size,
+        );
 
         for file in file_collector.files.iter() {
-            progress.add_progress(&file.name, file.file_id, file.size);
+            progress.register_file(&file.name, file.file_id, file.size);
         }
 
         match Arc::new(self.sender.clone()).start().await {
@@ -84,20 +82,20 @@ impl Send {
                 while !self.shutdown.is_terminated() {
                     if let Some(sender_msg) = stream.next().await {
                         match sender_msg {
-                            SenderInteractionMessage::Message(msg) => println!("{msg}"),
+                            SenderInteractionMessage::Message(msg) => progress.println(&msg),
                             SenderInteractionMessage::Error(e) => {
-                                println!("An error occurred: {}", e.to_string());
+                                progress.println(&format!("An error occurred: {}", e));
                                 self.shutdown();
                             }
                             SenderInteractionMessage::ReceiverReject => {
-                                println!("Receiver reject this share. exit...");
+                                progress.println("Receiver reject this share. exit...");
                                 self.shutdown();
                             }
                             SenderInteractionMessage::RelayFailed((relay_type, error)) => {
                                 if RelayType::Local.eq(&relay_type) || RelayType::Specify.eq(&relay_type) {
                                     process::exit(1);
                                 } else {
-                                    println!("connect to {} relay failed: {}", relay_type.to_string(), error);
+                                    progress.println(&format!("connect to {} relay failed: {}", relay_type.to_string(), error));
                                 }
                             }
                             SenderInteractionMessage::ContinueFile(file_id) => {
@@ -110,12 +108,11 @@ impl Send {
                                 progress.finish(file_id);
                             }
                             SenderInteractionMessage::OtherClose => {
-                                println!("The receive end is interrupted. exit...");
+                                progress.println("The receive end is interrupted. exit...");
                                 self.shutdown();
                             }
                             SenderInteractionMessage::SendDone => {
-                                print!("Send files done. don't close this window, waiting for the receiver to receive finish...");
-                                stdout().flush()?;
+                                // progress.println("Send files done. waiting for the receiver to receive finish...");
                             }
                             SenderInteractionMessage::Completed => {
                                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -131,10 +128,6 @@ impl Send {
             }
         }
 
-        print!("\r{}", format!("{:<width$}", "", width = 100));
-        stdout().flush()?;
-        print!("\r");
-        stdout().flush()?;
         Ok(())
     }
 

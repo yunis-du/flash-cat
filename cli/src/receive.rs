@@ -46,7 +46,7 @@ impl Receive {
                 anyhow!(format!("An error occurred: {}", e.to_string()))
             }
         })?;
-        let mut progress = Progress::new(1, 10);
+        let mut progress = Progress::new(1, 10, 0);
         while !self.shutdown.is_terminated() {
             if let Some(receiver_msg) = stream.next().await {
                 match receiver_msg {
@@ -62,7 +62,7 @@ impl Receive {
                         }
                         if self.assumeyes {
                             println!();
-                            progress.update(send_req.num_files, send_req.max_file_name_length as usize);
+                            progress.update(send_req.num_files, send_req.max_file_name_length as usize, send_req.total_size);
                             self.receiver.send_confirm(ReceiverConfirm::ReceiveConfirm(true)).await?;
                             continue;
                         }
@@ -72,7 +72,7 @@ impl Receive {
                         stdin().read_line(&mut input)?;
                         let input = input.trim();
                         if input.to_lowercase() == "y" || input.to_lowercase() == "yes" {
-                            progress.update(send_req.num_files, send_req.max_file_name_length as usize);
+                            progress.update(send_req.num_files, send_req.max_file_name_length as usize, send_req.total_size);
                             self.receiver.send_confirm(ReceiverConfirm::ReceiveConfirm(true)).await?;
                         } else {
                             self.receiver.send_confirm(ReceiverConfirm::ReceiveConfirm(false)).await?;
