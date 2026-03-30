@@ -131,7 +131,7 @@ impl FlashCatReceiver {
     async fn discovery_relay_addr(&self) -> Option<SocketAddr> {
         let match_content = self.encryptor.encrypt_share_code_bytes().to_vec();
         let shutdown = Shutdown::new();
-        let net_scout = NetScout::new(match_content, Duration::from_secs(3), shutdown.clone());
+        let net_scout = NetScout::new(match_content, Duration::from_millis(1500), shutdown.clone());
         if let Ok(addr) = net_scout.discovery().await {
             addr
         } else {
