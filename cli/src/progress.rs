@@ -68,7 +68,7 @@ impl Progress {
     }
 
     fn ensure_total_bar(&mut self) {
-        if self.total_bar.is_some() || self.total_size == 0 {
+        if self.total_bar.is_some() || self.total_size == 0 || self.num_files <= 1 {
             return;
         }
         let prefix = format!("{:<width$}", "Total", width = self.max_file_name_len);
