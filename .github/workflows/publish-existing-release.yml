@@ -121,28 +121,55 @@ jobs:
           GNUPGHOME="$(mktemp -d)"
           export GNUPGHOME
           APT_REPO_PASSPHRASE_FILE="${GNUPGHOME}/passphrase"
-          GPG_WRAPPER_DIR="$(mktemp -d)"
-          GPG_REAL="$(command -v gpg)"
-          export APT_REPO_PASSPHRASE_FILE GPG_REAL
+          PINENTRY_DIR="$(mktemp -d)"
+          PINENTRY_PROGRAM="${PINENTRY_DIR}/pinentry-auto"
+          export APT_REPO_PASSPHRASE_FILE
           REPREPRO_CMD="$(command -v eprepro || command -v reprepro)"
           CREATEREPO_CMD="$(command -v createrepo_c)"
-          trap 'rm -rf "${GNUPGHOME}" "${GPG_WRAPPER_DIR}"' EXIT
+          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "${GNUPGHOME}" "${PINENTRY_DIR}"' EXIT
 
           echo "Using apt repo command: ${REPREPRO_CMD}"
           echo "Using rpm repo command: ${CREATEREPO_CMD}"
-          echo "Using gpg command: ${GPG_REAL}"
+          echo "Using gpg command: $(command -v gpg)"
           echo "Importing apt repository signing key..."
           chmod 700 "${GNUPGHOME}"
           printf '%s\n' "${APT_REPO_PASSPHRASE}" > "${APT_REPO_PASSPHRASE_FILE}"
           chmod 600 "${APT_REPO_PASSPHRASE_FILE}"
+          cat > "${PINENTRY_PROGRAM}" <<'PINENTRY_EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          pinentry_escape() {
+            local value
+            value="$(tr -d '\r\n' < "${APT_REPO_PASSPHRASE_FILE}")"
+            value="${value//%/%25}"
+            printf '%s' "${value}"
+          }
+
+          printf 'OK CI pinentry ready\n'
+          while IFS= read -r line; do
+            case "${line}" in
+              GETPIN)
+                printf 'D %s\n' "$(pinentry_escape)"
+                printf 'OK\n'
+                ;;
+              BYE)
+                printf 'OK\n'
+                exit 0
+                ;;
+              *)
+                printf 'OK\n'
+                ;;
+            esac
+          done
+          PINENTRY_EOF
+          chmod 700 "${PINENTRY_PROGRAM}"
+          cat > "${GNUPGHOME}/gpg-agent.conf" <<GPG_AGENT_EOF
+          pinentry-program ${PINENTRY_PROGRAM}
+          allow-loopback-pinentry
+          GPG_AGENT_EOF
+          gpgconf --kill gpg-agent >/dev/null 2>&1 || true
           printf '%s' "${APT_REPO_GPG_PRIVATE_KEY_B64}" | base64 -d | gpg --batch --import
           gpg --batch --list-secret-keys
-          cat > "${GPG_WRAPPER_DIR}/gpg" <<'GPG_EOF'
-          #!/usr/bin/env bash
-          exec "${GPG_REAL}" --batch --pinentry-mode loopback --passphrase-file "${APT_REPO_PASSPHRASE_FILE}" "$@"
-          GPG_EOF
-          chmod 700 "${GPG_WRAPPER_DIR}/gpg"
-          export PATH="${GPG_WRAPPER_DIR}:${PATH}"
 
           echo "Extracting release archive to ${VERSION_DIR}..."
           mkdir -p "${VERSION_DIR}"
