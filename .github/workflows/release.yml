@@ -393,6 +393,7 @@ jobs:
           APT_REPO_PASSPHRASE="$(printf '%s' "${APT_REPO_PASSPHRASE_B64}" | base64 -d)"
           GNUPGHOME="$(mktemp -d)"
           export GNUPGHOME
+          APT_REPO_PASSPHRASE_FILE="${GNUPGHOME}/passphrase"
           REPREPRO_CMD="$(command -v eprepro || command -v reprepro)"
           CREATEREPO_CMD="$(command -v createrepo_c)"
           trap 'rm -rf "${GNUPGHOME}"' EXIT
@@ -401,6 +402,8 @@ jobs:
           echo "Using rpm repo command: ${CREATEREPO_CMD}"
           echo "Importing apt repository signing key..."
           chmod 700 "${GNUPGHOME}"
+          printf '%s\n' "${APT_REPO_PASSPHRASE}" > "${APT_REPO_PASSPHRASE_FILE}"
+          chmod 600 "${APT_REPO_PASSPHRASE_FILE}"
           printf '%s' "${APT_REPO_GPG_PRIVATE_KEY_B64}" | base64 -d | gpg --batch --import
           gpg --batch --list-secret-keys
 
@@ -424,9 +427,9 @@ jobs:
 
           echo "Publishing apt package: amd64..."
           cd /repo/apt
-          printf '%s\n' "${APT_REPO_PASSPHRASE}" | "${REPREPRO_CMD}" --ask-passphrase -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_amd64.deb"
+          "${REPREPRO_CMD}" --passphrase-file "${APT_REPO_PASSPHRASE_FILE}" --overwrite -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_amd64.deb"
           echo "Publishing apt package: arm64..."
-          printf '%s\n' "${APT_REPO_PASSPHRASE}" | "${REPREPRO_CMD}" --ask-passphrase -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_arm64.deb"
+          "${REPREPRO_CMD}" --passphrase-file "${APT_REPO_PASSPHRASE_FILE}" --overwrite -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_arm64.deb"
 
           echo "Updating latest version..."
           printf '%s\n' "${VERSION}" > "${BASE_DIR}/latest"
