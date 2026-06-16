@@ -335,6 +335,7 @@ jobs:
           PKG_SERVER_PORT: ${{ secrets.PKG_SERVER_PORT }}
           PKG_SERVER_SSH_KEY: ${{ secrets.PKG_SERVER_SSH_KEY }}
           APT_REPO_PASSPHRASE: ${{ secrets.APT_REPO_PASSPHRASE }}
+          APT_REPO_GPG_PRIVATE_KEY: ${{ secrets.APT_REPO_GPG_PRIVATE_KEY }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
@@ -343,6 +344,7 @@ jobs:
           : "${PKG_SERVER_USER:?PKG_SERVER_USER secret is required}"
           : "${PKG_SERVER_SSH_KEY:?PKG_SERVER_SSH_KEY secret is required}"
           : "${APT_REPO_PASSPHRASE:?APT_REPO_PASSPHRASE secret is required}"
+          : "${APT_REPO_GPG_PRIVATE_KEY:?APT_REPO_GPG_PRIVATE_KEY secret is required}"
 
           PKG_SERVER_PORT="${PKG_SERVER_PORT:-22}"
           ARCHIVE="flash-cat-${VERSION}-release.tar.gz"
@@ -355,35 +357,134 @@ jobs:
 
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "${PKG_SERVER_SSH_KEY}" > ~/.ssh/flash-cat-release
+          printf '%s\n' "${PKG_SERVER_SSH_KEY}" | tr -d '\r' > ~/.ssh/flash-cat-release
           chmod 600 ~/.ssh/flash-cat-release
           ssh-keyscan -p "${PKG_SERVER_PORT}" "${PKG_SERVER_HOST}" >> ~/.ssh/known_hosts
+          SSH_OPTS=(
+            -i ~/.ssh/flash-cat-release
+            -p "${PKG_SERVER_PORT}"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile=~/.ssh/known_hosts
+          )
 
           tar -czf "${ARCHIVE}" -C release .
-          scp -i ~/.ssh/flash-cat-release -P "${PKG_SERVER_PORT}" "${ARCHIVE}" "${PKG_SERVER_USER}@${PKG_SERVER_HOST}:${REMOTE_ARCHIVE}"
+          echo "Testing SSH connection..."
+          ssh "${SSH_OPTS[@]}" "${PKG_SERVER_USER}@${PKG_SERVER_HOST}" "echo SSH connection OK"
+          echo "Uploading release archive..."
+          ssh "${SSH_OPTS[@]}" "${PKG_SERVER_USER}@${PKG_SERVER_HOST}" "cat > '${REMOTE_ARCHIVE}'" < "${ARCHIVE}"
 
           APT_REPO_PASSPHRASE_B64="$(printf '%s' "${APT_REPO_PASSPHRASE}" | base64 -w0)"
-          ssh -i ~/.ssh/flash-cat-release -p "${PKG_SERVER_PORT}" "${PKG_SERVER_USER}@${PKG_SERVER_HOST}" \
+          APT_REPO_GPG_PRIVATE_KEY_B64="$(printf '%s' "${APT_REPO_GPG_PRIVATE_KEY}" | base64 -w0)"
+          echo "Publishing packages on remote server..."
+          ssh "${SSH_OPTS[@]}" "${PKG_SERVER_USER}@${PKG_SERVER_HOST}" \
             VERSION="${VERSION}" \
             REMOTE_ARCHIVE="${REMOTE_ARCHIVE}" \
             APT_REPO_PASSPHRASE_B64="${APT_REPO_PASSPHRASE_B64}" \
+            APT_REPO_GPG_PRIVATE_KEY_B64="${APT_REPO_GPG_PRIVATE_KEY_B64}" \
             'bash -s' <<'EOF'
-          set -euo pipefail
+          set -Eeuo pipefail
+          trap 'echo "Remote publish failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
           BASE_DIR="/opt/pkg/flash-cat"
           VERSION_DIR="${BASE_DIR}/${VERSION}"
+          RPM_REPO_BASE="/repo/rpm/flash-cat"
           APT_REPO_PASSPHRASE="$(printf '%s' "${APT_REPO_PASSPHRASE_B64}" | base64 -d)"
-          REPREPRO_CMD="$(command -v reprepro || command -v eprepro)"
+          GNUPGHOME="$(mktemp -d)"
+          export GNUPGHOME
+          REPREPRO_CMD="$(command -v eprepro || command -v reprepro)"
+          CREATEREPO_CMD="$(command -v createrepo_c)"
+          trap 'rm -rf "${GNUPGHOME}"' EXIT
 
+          echo "Using apt repo command: ${REPREPRO_CMD}"
+          echo "Using rpm repo command: ${CREATEREPO_CMD}"
+          echo "Importing apt repository signing key..."
+          chmod 700 "${GNUPGHOME}"
+          printf '%s' "${APT_REPO_GPG_PRIVATE_KEY_B64}" | base64 -d | gpg --batch --import
+          gpg --batch --list-secret-keys
+
+          echo "Extracting release archive to ${VERSION_DIR}..."
           mkdir -p "${VERSION_DIR}"
           tar -xzf "${REMOTE_ARCHIVE}" -C "${VERSION_DIR}"
           rm -f "${REMOTE_ARCHIVE}"
+          ls -la "${VERSION_DIR}"
 
-          /repo/rpm/flash-cat/publish.sh "${VERSION}"
+          test -f "${VERSION_DIR}/flash-cat_${VERSION}-1_amd64.deb"
+          test -f "${VERSION_DIR}/flash-cat_${VERSION}-1_arm64.deb"
+          test -f "${VERSION_DIR}/flash-cat-${VERSION}-1.el8.x86_64.rpm"
+          test -f "${VERSION_DIR}/flash-cat-${VERSION}-1.el8.aarch64.rpm"
 
+          echo "Publishing rpm packages..."
+          mkdir -p "${RPM_REPO_BASE}/aarch64" "${RPM_REPO_BASE}/x86_64"
+          cp "${VERSION_DIR}/flash-cat-${VERSION}-1.el8.aarch64.rpm" "${RPM_REPO_BASE}/aarch64/"
+          cp "${VERSION_DIR}/flash-cat-${VERSION}-1.el8.x86_64.rpm" "${RPM_REPO_BASE}/x86_64/"
+          "${CREATEREPO_CMD}" --update "${RPM_REPO_BASE}/aarch64/"
+          "${CREATEREPO_CMD}" --update "${RPM_REPO_BASE}/x86_64/"
+
+          echo "Publishing apt package: amd64..."
           cd /repo/apt
           printf '%s\n' "${APT_REPO_PASSPHRASE}" | "${REPREPRO_CMD}" --ask-passphrase -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_amd64.deb"
+          echo "Publishing apt package: arm64..."
           printf '%s\n' "${APT_REPO_PASSPHRASE}" | "${REPREPRO_CMD}" --ask-passphrase -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_arm64.deb"
 
+          echo "Updating latest version..."
           printf '%s\n' "${VERSION}" > "${BASE_DIR}/latest"
+          echo "Remote publish complete."
           EOF
+
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          : "${HOMEBREW_TAP_TOKEN:?HOMEBREW_TAP_TOKEN secret is required}"
+
+          test -f "release/flash-cat-cli-macos-${VERSION}-x86_64.tar.gz"
+          test -f "release/flash-cat-cli-macos-${VERSION}-aarch64.tar.gz"
+
+          MACOS_X86_SHA="$(sha256sum "release/flash-cat-cli-macos-${VERSION}-x86_64.tar.gz" | awk '{print $1}')"
+          MACOS_ARM_SHA="$(sha256sum "release/flash-cat-cli-macos-${VERSION}-aarch64.tar.gz" | awk '{print $1}')"
+
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/yunis-du/homebrew-brew.git" homebrew-brew
+          cd homebrew-brew
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          mkdir -p Formula
+          cat > Formula/flash-cat.rb <<EOF
+          class FlashCat < Formula
+            desc "Send things from one computer to another"
+            homepage "https://github.com/yunis-du/flash-cat"
+            version "${VERSION}"
+
+            if Hardware::CPU.intel?
+              url "https://github.com/yunis-du/flash-cat/releases/download/v#{version}/flash-cat-cli-macos-#{version}-x86_64.tar.gz"
+              sha256 "${MACOS_X86_SHA}"
+            elsif Hardware::CPU.arm?
+              url "https://github.com/yunis-du/flash-cat/releases/download/v#{version}/flash-cat-cli-macos-#{version}-aarch64.tar.gz"
+              sha256 "${MACOS_ARM_SHA}"
+            end
+
+            def install
+              if Hardware::CPU.intel?
+                bin.install "flash-cat"
+              elsif Hardware::CPU.arm?
+                bin.install "flash-cat"
+              end
+            end
+          end
+          EOF
+
+          if git diff --quiet; then
+            echo "Homebrew tap is already up to date."
+            exit 0
+          fi
+
+          git add Formula/flash-cat.rb
+          git commit -m "Update flash-cat to ${VERSION}"
+          TAP_BRANCH="$(git branch --show-current)"
+          git push origin "HEAD:${TAP_BRANCH}"
