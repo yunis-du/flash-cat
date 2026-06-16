@@ -438,11 +438,14 @@ jobs:
           "${CREATEREPO_CMD}" --update "${RPM_REPO_BASE}/aarch64/"
           "${CREATEREPO_CMD}" --update "${RPM_REPO_BASE}/x86_64/"
 
-          echo "Publishing apt package: amd64..."
           cd /repo/apt
-          "${REPREPRO_CMD}" --overwrite -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_amd64.deb"
+          echo "Removing old apt package if it exists..."
+          "${REPREPRO_CMD}" -Vb . remove flash-cat flash-cat || true
+
+          echo "Publishing apt package: amd64..."
+          "${REPREPRO_CMD}" -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_amd64.deb"
           echo "Publishing apt package: arm64..."
-          "${REPREPRO_CMD}" --overwrite -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_arm64.deb"
+          "${REPREPRO_CMD}" -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_arm64.deb"
 
           echo "Remote publish complete."
           EOF
