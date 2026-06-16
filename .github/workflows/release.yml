@@ -258,6 +258,10 @@ jobs:
           sha256sum * > checksums.txt
           cat checksums.txt
 
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
       - name: Generate Release Notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -323,3 +327,63 @@ jobs:
           prerelease: ${{ contains(github.ref, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish packages to download server
+        env:
+          PKG_SERVER_HOST: ${{ secrets.PKG_SERVER_HOST }}
+          PKG_SERVER_USER: ${{ secrets.PKG_SERVER_USER }}
+          PKG_SERVER_PORT: ${{ secrets.PKG_SERVER_PORT }}
+          PKG_SERVER_SSH_KEY: ${{ secrets.PKG_SERVER_SSH_KEY }}
+          APT_REPO_PASSPHRASE: ${{ secrets.APT_REPO_PASSPHRASE }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          : "${PKG_SERVER_HOST:?PKG_SERVER_HOST secret is required}"
+          : "${PKG_SERVER_USER:?PKG_SERVER_USER secret is required}"
+          : "${PKG_SERVER_SSH_KEY:?PKG_SERVER_SSH_KEY secret is required}"
+          : "${APT_REPO_PASSPHRASE:?APT_REPO_PASSPHRASE secret is required}"
+
+          PKG_SERVER_PORT="${PKG_SERVER_PORT:-22}"
+          ARCHIVE="flash-cat-${VERSION}-release.tar.gz"
+          REMOTE_ARCHIVE="/tmp/${ARCHIVE}"
+
+          test -f "release/flash-cat_${VERSION}-1_amd64.deb"
+          test -f "release/flash-cat_${VERSION}-1_arm64.deb"
+          test -f "release/flash-cat-${VERSION}-1.el8.x86_64.rpm"
+          test -f "release/flash-cat-${VERSION}-1.el8.aarch64.rpm"
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${PKG_SERVER_SSH_KEY}" > ~/.ssh/flash-cat-release
+          chmod 600 ~/.ssh/flash-cat-release
+          ssh-keyscan -p "${PKG_SERVER_PORT}" "${PKG_SERVER_HOST}" >> ~/.ssh/known_hosts
+
+          tar -czf "${ARCHIVE}" -C release .
+          scp -i ~/.ssh/flash-cat-release -P "${PKG_SERVER_PORT}" "${ARCHIVE}" "${PKG_SERVER_USER}@${PKG_SERVER_HOST}:${REMOTE_ARCHIVE}"
+
+          APT_REPO_PASSPHRASE_B64="$(printf '%s' "${APT_REPO_PASSPHRASE}" | base64 -w0)"
+          ssh -i ~/.ssh/flash-cat-release -p "${PKG_SERVER_PORT}" "${PKG_SERVER_USER}@${PKG_SERVER_HOST}" \
+            VERSION="${VERSION}" \
+            REMOTE_ARCHIVE="${REMOTE_ARCHIVE}" \
+            APT_REPO_PASSPHRASE_B64="${APT_REPO_PASSPHRASE_B64}" \
+            'bash -s' <<'EOF'
+          set -euo pipefail
+
+          BASE_DIR="/opt/pkg/flash-cat"
+          VERSION_DIR="${BASE_DIR}/${VERSION}"
+          APT_REPO_PASSPHRASE="$(printf '%s' "${APT_REPO_PASSPHRASE_B64}" | base64 -d)"
+          REPREPRO_CMD="$(command -v reprepro || command -v eprepro)"
+
+          mkdir -p "${VERSION_DIR}"
+          tar -xzf "${REMOTE_ARCHIVE}" -C "${VERSION_DIR}"
+          rm -f "${REMOTE_ARCHIVE}"
+
+          /repo/rpm/flash-cat/publish.sh "${VERSION}"
+
+          cd /repo/apt
+          printf '%s\n' "${APT_REPO_PASSPHRASE}" | "${REPREPRO_CMD}" --ask-passphrase -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_amd64.deb"
+          printf '%s\n' "${APT_REPO_PASSPHRASE}" | "${REPREPRO_CMD}" --ask-passphrase -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_arm64.deb"
+
+          printf '%s\n' "${VERSION}" > "${BASE_DIR}/latest"
+          EOF
