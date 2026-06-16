@@ -27,13 +27,16 @@ use flash_cat_common::{
 };
 use flash_cat_relay::{built_info, relay::Relay};
 
-use crate::{PING_INTERVAL, Progress, RelayType, SenderInteractionMessage, get_endpoint, send_msg_to_relay};
+use crate::{PING_INTERVAL, Progress, RelayType, SenderInteractionMessage, get_endpoint, normalize_relay_endpoint, send_msg_to_relay};
 
 /// Broadcast local relay addr timeout.
 pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Maximum number of files to transfer concurrently.
-pub const MAX_CONCURRENT_FILES: usize = 3;
+pub const MAX_CONCURRENT_FILES: usize = 1;
+
+/// How long the sender waits for receiver-side file confirmation.
+pub const FILE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Sender stream
 pub type SenderStream = Pin<Box<dyn Stream<Item = SenderInteractionMessage> + Send>>;
@@ -105,13 +108,7 @@ impl FlashCatSender {
 
         if self.specify_relay.is_some() {
             let specify_relay = self.specify_relay.clone().unwrap();
-            let specify_relay_addr = match specify_relay.parse() {
-                Ok(specify_relay_addr) => {
-                    let specify_relay_addr: SocketAddr = specify_relay_addr;
-                    format!("http://{specify_relay_addr}")
-                }
-                Err(_) => specify_relay,
-            };
+            let specify_relay_addr = normalize_relay_endpoint(specify_relay);
             let endpoint = get_endpoint(specify_relay_addr)?;
             self.connect_relay(
                 RelayType::Specify,
@@ -125,7 +122,7 @@ impl FlashCatSender {
         } else {
             // start local relay
             let local_relay_port = find_available_port(DEFAULT_RELAY_PORT);
-            self.start_loacl_relay(
+            self.start_local_relay(
                 format!("0.0.0.0:{}", local_relay_port).parse().unwrap(),
                 sender_stream_tx.clone(),
                 self.local_relay_shutdown.clone(),
@@ -176,7 +173,7 @@ impl FlashCatSender {
         }))
     }
 
-    async fn start_loacl_relay(
+    async fn start_local_relay(
         &self,
         local_relay_addr: SocketAddr,
         sender_stream_tx: mpsc::Sender<SenderInteractionMessage>,
@@ -785,7 +782,21 @@ impl FlashCatSender {
         )
         .await?;
 
-        let file_confirm = confirm_rx.await.map_err(|_| anyhow::anyhow!("confirm channel closed for file {}", send_file.file_id))?;
+        let file_confirm = match tokio::time::timeout(FILE_CONFIRM_TIMEOUT, confirm_rx).await {
+            Ok(Ok(file_confirm)) => file_confirm,
+            Ok(Err(_)) => {
+                confirm_waiters.lock().unwrap().remove(&send_file.file_id);
+                bail!("confirm channel closed for file {}", send_file.file_id);
+            }
+            Err(_) => {
+                confirm_waiters.lock().unwrap().remove(&send_file.file_id);
+                bail!(
+                    "timed out waiting for receiver confirmation for file {} after {}s",
+                    send_file.file_id,
+                    FILE_CONFIRM_TIMEOUT.as_secs()
+                );
+            }
+        };
 
         let mut position = 0;
 

@@ -4,7 +4,7 @@ use std::{
     cmp::max,
     fs::{self, File},
     io::{self, Read},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use anyhow::{Result, bail};
@@ -135,7 +135,7 @@ pub fn collect_files<P: AsRef<Path>>(paths: &[P]) -> FileCollector {
                             if directory.count() == 0 {
                                 // empty directory
                                 let file_info = FileInfo {
-                                    file_id: 0,
+                                    file_id,
                                     name: file_name,
                                     access_path: path.to_string_lossy().to_string(),
                                     relative_path: relative_path.to_string_lossy().to_string(),
@@ -144,6 +144,7 @@ pub fn collect_files<P: AsRef<Path>>(paths: &[P]) -> FileCollector {
                                     size: 0,
                                     empty_dir: true,
                                 };
+                                file_id += 1;
                                 fc.add_file(file_info);
                             }
                         }
@@ -401,6 +402,30 @@ pub fn reset_path(path: &str) -> String {
     }
 }
 
+pub fn safe_join_relative_path(
+    base: impl AsRef<Path>,
+    relative_path: &str,
+) -> Result<PathBuf> {
+    let normalized = reset_path(relative_path);
+    let mut safe_relative = PathBuf::new();
+
+    for component in Path::new(&normalized).components() {
+        match component {
+            Component::Normal(part) => safe_relative.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                bail!("unsafe relative path: {relative_path}");
+            }
+        }
+    }
+
+    if safe_relative.as_os_str().is_empty() {
+        bail!("empty relative path");
+    }
+
+    Ok(base.as_ref().join(safe_relative))
+}
+
 /// Check the file for missing (all-zero) chunks and calculate the percentage of saved data.
 ///
 /// # Arguments
@@ -451,4 +476,21 @@ pub fn missing_chunks(
     let percent = ((saved_chunks * chunk_size) as f64 / fsize as f64 * 100.0 * 100.0).round() / 100.0;
 
     Ok((saved_chunks, missing_chunks, percent))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_join_relative_path;
+
+    #[test]
+    fn safe_join_accepts_normal_relative_path() {
+        let path = safe_join_relative_path("/tmp/out", "folder/file.txt").unwrap();
+        assert!(path.ends_with("folder/file.txt"));
+    }
+
+    #[test]
+    fn safe_join_rejects_path_escape() {
+        assert!(safe_join_relative_path("/tmp/out", "../secret.txt").is_err());
+        assert!(safe_join_relative_path("/tmp/out", "/tmp/secret.txt").is_err());
+    }
 }

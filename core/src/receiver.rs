@@ -3,17 +3,17 @@ use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    path::Path,
+    path::{Path, PathBuf},
     pin::Pin,
-    sync::{Arc, LazyLock, RwLock},
+    sync::Arc,
     time::Duration,
 };
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use tokio::{
     fs,
     io::{AsyncSeekExt, AsyncWriteExt, SeekFrom},
-    sync::mpsc,
+    sync::{mpsc, oneshot},
 };
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream as TokioReceiverStream};
 use tonic::transport::Endpoint;
@@ -28,7 +28,7 @@ use flash_cat_common::{
         relay_service_client::RelayServiceClient, relay_update::RelayMessage, sender_update::SenderMessage,
     },
     utils::{
-        fs::{missing_chunks, reset_path},
+        fs::{missing_chunks, safe_join_relative_path},
         net::net_scout::NetScout,
     },
 };
@@ -36,10 +36,8 @@ use flash_cat_relay::built_info;
 
 use crate::{
     BreakPoint, FileDuplication, PING_INTERVAL, Progress, ReceiverConfirm, ReceiverInteractionMessage, RecvNewFile, RelayType, SendFilesRequest, get_endpoint,
-    send_msg_to_relay,
+    normalize_relay_endpoint, send_msg_to_relay,
 };
-
-static OUT_DIR: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new("".to_string()));
 
 /// Receiver stream
 pub type ReceiverStream = Pin<Box<dyn Stream<Item = ReceiverInteractionMessage> + Send>>;
@@ -50,6 +48,7 @@ pub struct FlashCatReceiver {
     specify_relay: Option<String>,
     confirm_tx: async_channel::Sender<ReceiverConfirm>,
     confirm_rx: async_channel::Receiver<ReceiverConfirm>,
+    output_dir: PathBuf,
     client_type: ClientType,
     lan: bool,
     shutdown: Shutdown,
@@ -63,9 +62,6 @@ impl FlashCatReceiver {
         client_type: ClientType,
         lan: bool,
     ) -> Result<Self> {
-        if output.is_some() {
-            *OUT_DIR.write().unwrap() = output.unwrap().clone();
-        }
         let encryptor = Arc::new(Encryptor::new(share_code)?);
         let (confirm_tx, confirm_rx) = async_channel::bounded(10);
         Ok(Self {
@@ -73,6 +69,7 @@ impl FlashCatReceiver {
             specify_relay,
             confirm_tx,
             confirm_rx,
+            output_dir: output.map(PathBuf::from).unwrap_or_default(),
             client_type,
             lan,
             shutdown: Shutdown::new(),
@@ -84,13 +81,7 @@ impl FlashCatReceiver {
 
         if self.specify_relay.is_some() {
             let specify_relay = self.specify_relay.clone().unwrap();
-            let specify_relay_addr = match specify_relay.parse() {
-                Ok(specify_relay_addr) => {
-                    let specify_relay_addr: SocketAddr = specify_relay_addr;
-                    format!("http://{specify_relay_addr}")
-                }
-                Err(_) => specify_relay,
-            };
+            let specify_relay_addr = normalize_relay_endpoint(specify_relay);
             let endpoint = get_endpoint(specify_relay_addr)?;
             self.connect_relay(RelayType::Specify, endpoint, receiver_stream_tx.clone(), self.shutdown.clone()).await?;
         } else {
@@ -254,8 +245,9 @@ impl FlashCatReceiver {
 
         let encryptor = self.encryptor.clone();
         let confirm_rx = self.confirm_rx.clone();
+        let output_dir = self.output_dir.clone();
         tokio::spawn(async move {
-            if let Err(e) = Self::relay_channel(encryptor, endpoint, &receiver_stream_tx, confirm_rx, shutdown).await {
+            if let Err(e) = Self::relay_channel(encryptor, endpoint, &receiver_stream_tx, confirm_rx, output_dir, shutdown).await {
                 let _ = &receiver_stream_tx.send(ReceiverInteractionMessage::Error(e.to_string())).await;
             }
         });
@@ -295,11 +287,12 @@ impl FlashCatReceiver {
         endpoint: Endpoint,
         receiver_stream_tx: &mpsc::Sender<ReceiverInteractionMessage>,
         confirm_rx: async_channel::Receiver<ReceiverConfirm>,
+        output_dir: PathBuf,
         shutdown: Shutdown,
     ) -> Result<()> {
         let (mut client, mut tx, mut messages) = Self::establish_channel(&encryptor, &endpoint).await?;
 
-        let mut recv_files = HashMap::new();
+        let mut recv_files: HashMap<u64, RecvFile> = HashMap::new();
 
         let mut ping_interval = tokio::time::interval(PING_INTERVAL);
         let mut reconnect_attempt = 0u32;
@@ -364,6 +357,11 @@ impl FlashCatReceiver {
                                 })
                             };
                             send_msg_to_relay(&tx, file_confirm).await?;
+                            if !accept {
+                                if let Some(mut recv_file) = recv_files.remove(&file_id) {
+                                    recv_file.finish().await?;
+                                }
+                            }
                         }
                         ReceiverConfirm::BreakPointConfirm((accept, file_id, position)) => {
                             let break_point_confirm = if accept {
@@ -396,6 +394,11 @@ impl FlashCatReceiver {
                                 })
                             };
                             send_msg_to_relay(&tx, break_point_confirm).await?;
+                            if !accept {
+                                if let Some(recv_file) = recv_files.get_mut(&file_id) {
+                                    recv_file.restart().await?;
+                                }
+                            }
                         }
                     }
                     continue;
@@ -498,9 +501,7 @@ impl FlashCatReceiver {
                                     })),
                                 });
 
-                                let relative_path = reset_path(new_file_req.relative_path.as_str());
-
-                                let absolute_path = Path::new(OUT_DIR.read().unwrap().as_str()).join(relative_path.as_str());
+                                let absolute_path = safe_join_relative_path(&output_dir, new_file_req.relative_path.as_str())?;
                                 if new_file_req.is_empty_dir {
                                     tokio::fs::create_dir_all(&absolute_path).await?;
                                     send_msg_to_relay(&tx, accept_msg).await?;
@@ -521,7 +522,7 @@ impl FlashCatReceiver {
                                 if absolute_path.exists() {
                                     let recv_file_len = fs::metadata(&absolute_path).await?.len();
 
-                                    let recv_file = RecvFile::new(fs::File::options().write(true).read(true).open(&absolute_path).await?);
+                                    let recv_file = RecvFile::new(fs::File::options().write(true).read(true).open(&absolute_path).await?, 0).await?;
                                     recv_files.insert(new_file_req.file_id, recv_file);
 
                                     if recv_file_len == new_file_req.total_size {
@@ -569,9 +570,8 @@ impl FlashCatReceiver {
                                             })
                                             .await?;
                                     }
-                                    file_instance.set_len(new_file_req.total_size).await?;
 
-                                    let recv_file = RecvFile::new(file_instance);
+                                    let recv_file = RecvFile::new(file_instance, 0).await?;
                                     recv_files.insert(new_file_req.file_id, recv_file);
 
                                     send_msg_to_relay(&tx, accept_msg).await?;
@@ -684,8 +684,9 @@ impl FlashCatReceiver {
 }
 
 enum FileWriteCommand {
-    Write(Vec<u8>),
-    Seek(u64),
+    Write(Vec<u8>, oneshot::Sender<Result<u64, String>>),
+    Seek(u64, oneshot::Sender<Result<u64, String>>),
+    Restart(oneshot::Sender<Result<u64, String>>),
     Finish,
 }
 
@@ -696,17 +697,74 @@ struct RecvFile {
 }
 
 impl RecvFile {
-    fn new(mut file: fs::File) -> Self {
+    async fn new(
+        mut file: fs::File,
+        position: u64,
+    ) -> Result<Self> {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<FileWriteCommand>(1024);
 
         let writer_handle = tokio::spawn(async move {
+            let mut progress = position;
+            file.seek(SeekFrom::Start(position)).await?;
             while let Some(cmd) = rx.recv().await {
                 match cmd {
-                    FileWriteCommand::Write(data) => {
-                        file.write_all(&data).await?;
+                    FileWriteCommand::Write(data, ack) => {
+                        let result: Result<u64> = async {
+                            file.write_all(&data).await?;
+                            progress += data.len() as u64;
+                            Ok(progress)
+                        }
+                        .await;
+
+                        match result {
+                            Ok(progress) => {
+                                let _ = ack.send(Ok(progress));
+                            }
+                            Err(e) => {
+                                let msg = e.to_string();
+                                let _ = ack.send(Err(msg.clone()));
+                                bail!(msg);
+                            }
+                        }
                     }
-                    FileWriteCommand::Seek(position) => {
-                        file.seek(SeekFrom::Start(position)).await?;
+                    FileWriteCommand::Seek(position, ack) => {
+                        let result: Result<u64> = async {
+                            file.seek(SeekFrom::Start(position)).await?;
+                            progress = position;
+                            Ok(progress)
+                        }
+                        .await;
+
+                        match result {
+                            Ok(progress) => {
+                                let _ = ack.send(Ok(progress));
+                            }
+                            Err(e) => {
+                                let msg = e.to_string();
+                                let _ = ack.send(Err(msg.clone()));
+                                bail!(msg);
+                            }
+                        }
+                    }
+                    FileWriteCommand::Restart(ack) => {
+                        let result: Result<u64> = async {
+                            file.set_len(0).await?;
+                            file.seek(SeekFrom::Start(0)).await?;
+                            progress = 0;
+                            Ok(progress)
+                        }
+                        .await;
+
+                        match result {
+                            Ok(progress) => {
+                                let _ = ack.send(Ok(progress));
+                            }
+                            Err(e) => {
+                                let msg = e.to_string();
+                                let _ = ack.send(Err(msg.clone()));
+                                bail!(msg);
+                            }
+                        }
                     }
                     FileWriteCommand::Finish => {
                         file.flush().await?;
@@ -717,20 +775,20 @@ impl RecvFile {
             Ok(())
         });
 
-        Self {
+        Ok(Self {
             tx,
             writer_handle: Some(writer_handle),
-            progress: 0,
-        }
+            progress: position,
+        })
     }
 
     async fn write(
         &mut self,
         data: Vec<u8>,
     ) -> Result<()> {
-        let data_len = data.len() as u64;
-        self.tx.send(FileWriteCommand::Write(data)).await?;
-        self.progress += data_len;
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.tx.send(FileWriteCommand::Write(data, ack_tx)).await?;
+        self.progress = ack_rx.await.map_err(|_| anyhow!("writer task stopped"))?.map_err(anyhow::Error::msg)?;
         Ok(())
     }
 
@@ -738,8 +796,16 @@ impl RecvFile {
         &mut self,
         position: u64,
     ) -> Result<()> {
-        self.tx.send(FileWriteCommand::Seek(position)).await?;
-        self.progress = position;
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.tx.send(FileWriteCommand::Seek(position, ack_tx)).await?;
+        self.progress = ack_rx.await.map_err(|_| anyhow!("writer task stopped"))?.map_err(anyhow::Error::msg)?;
+        Ok(())
+    }
+
+    async fn restart(&mut self) -> Result<()> {
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.tx.send(FileWriteCommand::Restart(ack_tx)).await?;
+        self.progress = ack_rx.await.map_err(|_| anyhow!("writer task stopped"))?.map_err(anyhow::Error::msg)?;
         Ok(())
     }
 

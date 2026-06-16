@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{net::SocketAddr, time::Duration};
 
 use anyhow::Result;
 use bytes::Bytes;
@@ -116,6 +116,13 @@ fn get_endpoint(s: impl Into<Bytes>) -> Result<Endpoint> {
         .http2_adaptive_window(true) // enable adaptive window size
         .tcp_keepalive(Some(DEFAULT_TCP_KEEPALIVE)); // set TCP keepalive
     Ok(endpoint)
+}
+
+fn normalize_relay_endpoint(relay: String) -> String {
+    match relay.parse::<SocketAddr>() {
+        Ok(addr) => format!("http://{addr}"),
+        Err(_) => relay,
+    }
 }
 
 /// Calculate reconnect delay with exponential backoff and jitter.

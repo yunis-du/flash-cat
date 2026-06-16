@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
-use dashmap::DashMap;
+use dashmap::{DashMap, mapref::entry::Entry};
 use flash_cat_common::Shutdown;
 use log::debug;
 use tokio::time;
@@ -85,6 +85,21 @@ impl RelayState {
     ) {
         if let Some(prev_session) = self.store.insert(name.to_string(), session) {
             prev_session.shutdown();
+        }
+    }
+
+    /// Insert a session only when no active session exists for the share code.
+    pub fn insert_if_absent(
+        &self,
+        name: &str,
+        session: Arc<Session>,
+    ) -> bool {
+        match self.store.entry(name.to_string()) {
+            Entry::Occupied(_) => false,
+            Entry::Vacant(entry) => {
+                entry.insert(session);
+                true
+            }
         }
     }
 

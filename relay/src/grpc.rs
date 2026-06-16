@@ -55,14 +55,19 @@ impl RelayService for GrpcServer {
 
                 match character {
                     Character::Sender => {
-                        // Allow re-join: replace existing session for reconnection support
                         debug!("new sender({session_code}) incoming");
                         let metadata = Metadata {
                             encrypted_share_code: id.encrypted_share_code,
                             sender_local_relay: request.sender_local_relay,
                         };
                         let session = Arc::new(Session::new(metadata));
-                        self.0.insert(&session_code, session.clone());
+                        if !self.0.insert_if_absent(&session_code, session.clone()) {
+                            return Ok(Response::new(JoinResponse {
+                                join_response_message: Some(JoinResponseMessage::Failed(JoinFailed {
+                                    error_msg: "share code already has an active sender session".to_string(),
+                                })),
+                            }));
+                        }
                     }
                     Character::Receiver => match self.0.lookup(&session_code) {
                         None => {
