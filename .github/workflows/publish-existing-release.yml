@@ -121,18 +121,28 @@ jobs:
           GNUPGHOME="$(mktemp -d)"
           export GNUPGHOME
           APT_REPO_PASSPHRASE_FILE="${GNUPGHOME}/passphrase"
+          GPG_WRAPPER_DIR="$(mktemp -d)"
+          GPG_REAL="$(command -v gpg)"
+          export APT_REPO_PASSPHRASE_FILE GPG_REAL
           REPREPRO_CMD="$(command -v eprepro || command -v reprepro)"
           CREATEREPO_CMD="$(command -v createrepo_c)"
-          trap 'rm -rf "${GNUPGHOME}"' EXIT
+          trap 'rm -rf "${GNUPGHOME}" "${GPG_WRAPPER_DIR}"' EXIT
 
           echo "Using apt repo command: ${REPREPRO_CMD}"
           echo "Using rpm repo command: ${CREATEREPO_CMD}"
+          echo "Using gpg command: ${GPG_REAL}"
           echo "Importing apt repository signing key..."
           chmod 700 "${GNUPGHOME}"
           printf '%s\n' "${APT_REPO_PASSPHRASE}" > "${APT_REPO_PASSPHRASE_FILE}"
           chmod 600 "${APT_REPO_PASSPHRASE_FILE}"
           printf '%s' "${APT_REPO_GPG_PRIVATE_KEY_B64}" | base64 -d | gpg --batch --import
           gpg --batch --list-secret-keys
+          cat > "${GPG_WRAPPER_DIR}/gpg" <<'GPG_EOF'
+          #!/usr/bin/env bash
+          exec "${GPG_REAL}" --batch --pinentry-mode loopback --passphrase-file "${APT_REPO_PASSPHRASE_FILE}" "$@"
+          GPG_EOF
+          chmod 700 "${GPG_WRAPPER_DIR}/gpg"
+          export PATH="${GPG_WRAPPER_DIR}:${PATH}"
 
           echo "Extracting release archive to ${VERSION_DIR}..."
           mkdir -p "${VERSION_DIR}"
@@ -157,9 +167,9 @@ jobs:
 
           echo "Publishing apt package: amd64..."
           cd /repo/apt
-          "${REPREPRO_CMD}" --passphrase-file "${APT_REPO_PASSPHRASE_FILE}" --overwrite -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_amd64.deb"
+          "${REPREPRO_CMD}" --overwrite -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_amd64.deb"
           echo "Publishing apt package: arm64..."
-          "${REPREPRO_CMD}" --passphrase-file "${APT_REPO_PASSPHRASE_FILE}" --overwrite -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_arm64.deb"
+          "${REPREPRO_CMD}" --overwrite -Vb . includedeb flash-cat "${VERSION_DIR}/flash-cat_${VERSION}-1_arm64.deb"
 
           echo "Remote publish complete."
           REMOTE_EOF
