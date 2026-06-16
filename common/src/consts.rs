@@ -18,8 +18,8 @@ pub const DEFAULT_HTTP2_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 /// The default tcp keepalive.
 pub const DEFAULT_TCP_KEEPALIVE: Duration = Duration::from_secs(30);
 
-/// Send buffer size: 32Kib
-pub const SEND_BUFF_SIZE: usize = 32 * 1024;
+/// Send buffer size: 256KiB.
+pub const SEND_BUFF_SIZE: usize = 256 * 1024;
 
 /// Max reconnect retries.
 pub const MAX_RECONNECT_RETRIES: u32 = 5;

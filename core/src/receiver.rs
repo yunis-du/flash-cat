@@ -273,7 +273,7 @@ impl FlashCatReceiver {
     )> {
         let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
 
-        let (tx, rx) = mpsc::channel(32);
+        let (tx, rx) = mpsc::channel(256);
 
         let join = RelayMessage::Join(Id {
             encrypted_share_code: encryptor.encrypt_share_code_bytes(),
