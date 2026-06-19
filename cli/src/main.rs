@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::{Result, bail};
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use log::info;
 #[cfg(windows)]
 use tokio::signal::ctrl_c;
@@ -47,6 +47,10 @@ struct SendCmd {
     /// Relay address (default: public relay [https://flashcat.yunisdu.com])
     #[clap(long, env = "FLASH_CAT_RELAY")]
     relay: Option<String>,
+
+    /// Disable LAN discovery while sending
+    #[clap(long = "no-lan", action = ArgAction::SetFalse, default_value_t = true)]
+    lan_broadcast: bool,
 
     /// File(s) or folder(s) to send
     #[clap(required = true, num_args = 1..)]
@@ -120,7 +124,7 @@ async fn send(send_cmd: SendCmd) -> Result<()> {
     #[cfg(windows)]
     let sigint = ctrl_c();
 
-    let send = Send::new(send_cmd.zip, send_cmd.relay, send_cmd.files).await?;
+    let send = Send::new(send_cmd.zip, send_cmd.relay, send_cmd.files, send_cmd.lan_broadcast).await?;
 
     let send_task = async { send.run().await };
 

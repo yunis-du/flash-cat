@@ -50,6 +50,7 @@ pub struct FlashCatSender {
     local_relay_shutdown: Shutdown,
     public_relay_shutdown: Shutdown,
     client_type: ClientType,
+    lan_broadcast: bool,
     shutdown: Shutdown,
 }
 
@@ -60,6 +61,7 @@ impl FlashCatSender {
         mut files: Vec<String>,
         zip_floder: bool,
         client_type: ClientType,
+        lan_broadcast: bool,
     ) -> Result<Self> {
         paths_exist(files.as_slice())?;
         let shutdown = Shutdown::new();
@@ -79,6 +81,7 @@ impl FlashCatSender {
             local_relay_shutdown: Shutdown::new(),
             public_relay_shutdown: Shutdown::new(),
             client_type,
+            lan_broadcast,
             shutdown,
         })
     }
@@ -88,6 +91,7 @@ impl FlashCatSender {
         specify_relay: Option<String>,
         file_collector: FileCollector,
         client_type: ClientType,
+        lan_broadcast: bool,
     ) -> Result<Self> {
         let shutdown = Shutdown::new();
         let encryptor = Arc::new(Encryptor::new(share_code)?);
@@ -99,6 +103,7 @@ impl FlashCatSender {
             local_relay_shutdown: Shutdown::new(),
             public_relay_shutdown: Shutdown::new(),
             client_type,
+            lan_broadcast,
             shutdown,
         })
     }
@@ -156,8 +161,9 @@ impl FlashCatSender {
             )
             .await?;
 
-            // broadcast
-            self.broadcast_relay_addr(local_relay_port, sender_stream_tx.clone()).await;
+            if self.lan_broadcast {
+                self.broadcast_relay_addr(local_relay_port, sender_stream_tx.clone()).await;
+            }
         }
         // resolve shutdown when sender_stream_rx is no message will cause panic
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));

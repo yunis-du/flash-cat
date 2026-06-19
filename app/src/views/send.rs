@@ -285,7 +285,7 @@ impl Render for SendView {
                             view.progress_bars.clear(); // in case of re-collecting files
                             file_collector.files.iter().for_each(|f| view.progress_bars.push(ProgressBar::new(f.file_id, f.name.clone(), f.size)));
 
-                            let fcs = FlashCatSender::new_with_file_collector(share_code.clone(), specify_relay, file_collector.clone(), ClientType::App);
+                            let fcs = FlashCatSender::new_with_file_collector(share_code.clone(), specify_relay, file_collector.clone(), ClientType::App, true);
                             match fcs {
                                 Ok(fcs) => {
                                     let fcs = Arc::new(fcs);
