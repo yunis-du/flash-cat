@@ -33,7 +33,7 @@ use crate::{PING_INTERVAL, Progress, RelayType, SenderInteractionMessage, get_en
 pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Maximum number of files to transfer concurrently.
-pub const MAX_CONCURRENT_FILES: usize = 1;
+pub const MAX_CONCURRENT_FILES: usize = 3;
 
 /// How long the sender waits for receiver-side file confirmation.
 pub const FILE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(300);

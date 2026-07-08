@@ -7,8 +7,8 @@ use tonic::transport::Endpoint;
 
 use flash_cat_common::{
     consts::{
-        DEFAULT_CONNECT_TIMEOUT, DEFAULT_HTTP2_KEEPALIVE_INTERVAL, DEFAULT_HTTP2_KEEPALIVE_TIMEOUT, DEFAULT_TCP_KEEPALIVE, MAX_RECONNECT_RETRIES,
-        RECONNECT_BASE_DELAY, RECONNECT_MAX_DELAY,
+        DEFAULT_CONNECT_TIMEOUT, DEFAULT_HTTP2_KEEPALIVE_INTERVAL, DEFAULT_HTTP2_KEEPALIVE_TIMEOUT, DEFAULT_TCP_KEEPALIVE, INITIAL_WINDOW_SIZE,
+        MAX_RECONNECT_RETRIES, RECONNECT_BASE_DELAY, RECONNECT_MAX_DELAY,
     },
     proto::{RelayUpdate, relay_update::RelayMessage},
 };
@@ -113,6 +113,8 @@ fn get_endpoint(s: impl Into<Bytes>) -> Result<Endpoint> {
         .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
         .http2_keep_alive_interval(DEFAULT_HTTP2_KEEPALIVE_INTERVAL)
         .keep_alive_timeout(DEFAULT_HTTP2_KEEPALIVE_TIMEOUT)
+        .initial_connection_window_size(INITIAL_WINDOW_SIZE)
+        .initial_stream_window_size(INITIAL_WINDOW_SIZE)
         .http2_adaptive_window(true) // enable adaptive window size
         .tcp_keepalive(Some(DEFAULT_TCP_KEEPALIVE)); // set TCP keepalive
     Ok(endpoint)
