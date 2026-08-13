@@ -1,3 +1,5 @@
+
+
 # Flash-Cat
 
 English | [简体中文](./README_CN.md)
@@ -56,7 +58,7 @@ brew tap yunis-du/brew
 brew install flash-cat
 ```
 
-### Or, you can install Cargo and build from source (requires Cargo 1.85+)
+### Or, you can install Rust and build from source (requires Rust 1.85+)
 
 ```bash
 cargo install --git https://github.com/yunis-du/flash-cat flash_cat_cli
