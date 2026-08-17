@@ -6,14 +6,14 @@ use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncSeekExt, SeekFrom},
     signal::ctrl_c,
-    sync::{Semaphore, mpsc, oneshot},
+    sync::mpsc,
 };
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tonic::transport::Endpoint;
 
 use flash_cat_common::{
     Shutdown, compare_versions,
-    consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY, SEND_BUFF_SIZE},
+    consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY, RELAY_CHANNEL_CAPACITY, SEND_BUFF_SIZE},
     crypt::encryptor::Encryptor,
     proto::{
         BreakPoint, Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, FileData, FileDone, Id, JoinRequest, NewFileRequest, RelayInfo,
@@ -31,9 +31,6 @@ use crate::{PING_INTERVAL, Progress, RelayType, SenderInteractionMessage, get_en
 
 /// Broadcast local relay addr timeout.
 pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// Maximum number of files to transfer concurrently.
-pub const MAX_CONCURRENT_FILES: usize = 3;
 
 /// How long the sender waits for receiver-side file confirmation.
 pub const FILE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(300);
@@ -354,7 +351,7 @@ impl FlashCatSender {
     )> {
         let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
 
-        let (tx, rx) = mpsc::channel(256);
+        let (tx, rx) = mpsc::channel(RELAY_CHANNEL_CAPACITY);
 
         let join = RelayMessage::Join(Id {
             encrypted_share_code: encryptor.encrypt_share_code_bytes(),
@@ -621,13 +618,6 @@ impl FlashCatSender {
         }
     }
 
-    fn extract_confirm_file_id(confirm: &FileConfirm) -> Option<u64> {
-        confirm.confirm_message.as_ref().map(|msg| match msg {
-            ConfirmMessage::NewFileConfirm(c) => c.file_id,
-            ConfirmMessage::BreakPointConfirm(c) => c.file_id,
-        })
-    }
-
     async fn send_files(
         encryptor: Arc<Encryptor>,
         tx: mpsc::Sender<RelayUpdate>,
@@ -637,32 +627,6 @@ impl FlashCatSender {
         cancel: Shutdown,
         resume_progress: Option<HashMap<u64, (u64, bool)>>,
     ) -> Result<()> {
-        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_FILES));
-        let confirm_waiters: Arc<std::sync::Mutex<HashMap<u64, oneshot::Sender<FileConfirm>>>> = Arc::new(std::sync::Mutex::new(HashMap::new()));
-
-        let confirm_waiters_ref = confirm_waiters.clone();
-        let cancel_ref = cancel.clone();
-        let dispatcher = tokio::spawn(async move {
-            loop {
-                if cancel_ref.is_terminated() {
-                    return;
-                }
-                match notify.recv().await {
-                    Ok(file_confirm) => {
-                        if let Some(file_id) = Self::extract_confirm_file_id(&file_confirm) {
-                            let sender = confirm_waiters_ref.lock().unwrap().remove(&file_id);
-                            if let Some(sender) = sender {
-                                let _ = sender.send(file_confirm);
-                            }
-                        }
-                    }
-                    Err(_) => return,
-                }
-            }
-        });
-
-        let mut tasks = Vec::new();
-
         for send_file in file_collector.files.iter() {
             if cancel.is_terminated() {
                 break;
@@ -678,53 +642,7 @@ impl FlashCatSender {
 
             let file_resume = resume_progress.as_ref().and_then(|p| p.get(&send_file.file_id).copied());
 
-            let permit = semaphore.clone().acquire_owned().await.map_err(|e| anyhow::anyhow!("semaphore closed: {}", e))?;
-
-            let send_file = send_file.clone();
-            let encryptor = encryptor.clone();
-            let tx = tx.clone();
-            let sender_stream_tx = sender_stream_tx.clone();
-            let cancel = cancel.clone();
-            let confirm_waiters = confirm_waiters.clone();
-
-            let task = tokio::spawn(async move {
-                let result = Self::send_single_file(
-                    &send_file,
-                    &encryptor,
-                    &tx,
-                    &sender_stream_tx,
-                    &cancel,
-                    &confirm_waiters,
-                    file_resume,
-                )
-                .await;
-                drop(permit);
-                result
-            });
-            tasks.push(task);
-        }
-
-        let mut first_error = None;
-        for task in tasks {
-            match task.await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => {
-                    if first_error.is_none() {
-                        first_error = Some(e);
-                    }
-                }
-                Err(e) => {
-                    if first_error.is_none() {
-                        first_error = Some(anyhow::anyhow!("task panicked: {}", e));
-                    }
-                }
-            }
-        }
-
-        dispatcher.abort();
-
-        if let Some(e) = first_error {
-            return Err(e);
+            Self::send_single_file(send_file, &encryptor, &tx, &notify, sender_stream_tx, &cancel, file_resume).await?;
         }
 
         send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
@@ -736,9 +654,9 @@ impl FlashCatSender {
         send_file: &FileInfo,
         encryptor: &Encryptor,
         tx: &mpsc::Sender<RelayUpdate>,
+        notify: &async_channel::Receiver<FileConfirm>,
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
         cancel: &Shutdown,
-        confirm_waiters: &std::sync::Mutex<HashMap<u64, oneshot::Sender<FileConfirm>>>,
         file_resume: Option<(u64, bool)>,
     ) -> Result<()> {
         // Resume: partial file — send BreakPoint and stream remaining data
@@ -767,9 +685,6 @@ impl FlashCatSender {
         }
 
         // Normal flow: send NewFileRequest, wait for confirm, then stream data
-        let (confirm_tx, confirm_rx) = oneshot::channel();
-        confirm_waiters.lock().unwrap().insert(send_file.file_id, confirm_tx);
-
         send_msg_to_relay(
             tx,
             RelayMessage::Sender(SenderUpdate {
@@ -788,21 +703,16 @@ impl FlashCatSender {
         )
         .await?;
 
-        let file_confirm = match tokio::time::timeout(FILE_CONFIRM_TIMEOUT, confirm_rx).await {
-            Ok(Ok(file_confirm)) => file_confirm,
-            Ok(Err(_)) => {
-                confirm_waiters.lock().unwrap().remove(&send_file.file_id);
-                bail!("confirm channel closed for file {}", send_file.file_id);
-            }
-            Err(_) => {
-                confirm_waiters.lock().unwrap().remove(&send_file.file_id);
-                bail!(
+        let file_confirm = tokio::time::timeout(FILE_CONFIRM_TIMEOUT, notify.recv())
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
                     "timed out waiting for receiver confirmation for file {} after {}s",
                     send_file.file_id,
                     FILE_CONFIRM_TIMEOUT.as_secs()
-                );
-            }
-        };
+                )
+            })?
+            .map_err(|_| anyhow::anyhow!("confirm channel closed for file {}", send_file.file_id))?;
 
         let mut position = 0;
 
@@ -870,11 +780,12 @@ impl FlashCatSender {
         let mut read_file = File::open(send_file.access_path.as_str()).await?;
         read_file.seek(SeekFrom::Start(start_position)).await?;
         let mut position = start_position;
+        let mut buffer = BytesMut::with_capacity(SEND_BUFF_SIZE);
         loop {
             if cancel.is_terminated() {
                 return Ok(());
             }
-            let mut buffer = BytesMut::with_capacity(SEND_BUFF_SIZE);
+            buffer.clear();
             let read_length = read_file.read_buf(&mut buffer).await?;
             if read_length == 0 {
                 send_msg_to_relay(

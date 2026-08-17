@@ -6,6 +6,7 @@ use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status, Streaming};
 
 use flash_cat_common::{
+    consts::RELAY_CHANNEL_CAPACITY,
     proto::{
         Character, CloseRequest, CloseResponse, JoinFailed, JoinRequest, JoinResponse, JoinSuccess, Joined, Ready, RelayInfo, RelayUpdate, Terminated,
         join_response::JoinResponseMessage, relay_service_server::RelayService, relay_update::RelayMessage,
@@ -127,7 +128,7 @@ impl RelayService for GrpcServer {
             None => return Err(Status::invalid_argument("missing first message")),
         };
 
-        let (tx, rx) = mpsc::channel(256);
+        let (tx, rx) = mpsc::channel(RELAY_CHANNEL_CAPACITY);
 
         let (session, character) = match first_update.relay_message {
             Some(RelayMessage::Join(join)) => {

@@ -20,7 +20,7 @@ use tonic::transport::Endpoint;
 
 use flash_cat_common::{
     Shutdown, compare_versions,
-    consts::{PUBLIC_RELAY, SEND_BUFF_SIZE},
+    consts::{PUBLIC_RELAY, RELAY_CHANNEL_CAPACITY, SEND_BUFF_SIZE},
     crypt::encryptor::Encryptor,
     proto::{
         BreakPointConfirm, Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, FileResumeProgress, Id, JoinRequest, NewFileConfirm,
@@ -265,7 +265,7 @@ impl FlashCatReceiver {
     )> {
         let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
 
-        let (tx, rx) = mpsc::channel(256);
+        let (tx, rx) = mpsc::channel(RELAY_CHANNEL_CAPACITY);
 
         let join = RelayMessage::Join(Id {
             encrypted_share_code: encryptor.encrypt_share_code_bytes(),

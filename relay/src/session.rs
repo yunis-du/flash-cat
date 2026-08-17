@@ -6,6 +6,7 @@ use parking_lot::Mutex;
 
 use flash_cat_common::{
     Shutdown,
+    consts::RELAY_CHANNEL_CAPACITY,
     proto::{RelayInfo, relay_update::RelayMessage},
 };
 
@@ -27,8 +28,8 @@ pub struct SessionUserPair {
 
 impl SessionUserPair {
     pub fn new() -> Self {
-        let (sharer_update_tx, sharer_update_rx) = async_channel::bounded(256);
-        let (recipient_update_tx, recipient_update_rx) = async_channel::bounded(256);
+        let (sharer_update_tx, sharer_update_rx) = async_channel::bounded(RELAY_CHANNEL_CAPACITY);
+        let (recipient_update_tx, recipient_update_rx) = async_channel::bounded(RELAY_CHANNEL_CAPACITY);
         Self {
             sharer_update_tx,
             sharer_update_rx,
