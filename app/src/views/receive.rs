@@ -301,10 +301,12 @@ impl Render for ReceiveView {
                                                         }
                                                     }
                                                     ReceiverInteractionMessage::OtherClose => {
-                                                        // let locale = cx.global::<FlashCatAppGlobalStore>().read(cx).locale();
-                                                        // view.notification = NotificationType::Error(
-                                                        //     t!("receive.error_other", error = "Connection closed", locale = locale).to_string(),
-                                                        // );
+                                                        if let Some(receiver) = view.flash_cat_receiver.take() {
+                                                            receiver.shutdown();
+                                                        }
+                                                        view.notification = NotificationType::Message("Sender disconnected".to_string());
+                                                        view.receive_state = ReceiveState::Idle;
+                                                        view.progress_bars.clear();
                                                         return true;
                                                     }
                                                     ReceiverInteractionMessage::ReceiveDone => {

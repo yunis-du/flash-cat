@@ -23,9 +23,9 @@ use flash_cat_common::{
     consts::{PUBLIC_RELAY, RELAY_CHANNEL_CAPACITY, SEND_BUFF_SIZE},
     crypt::encryptor::Encryptor,
     proto::{
-        BreakPointConfirm, Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, FileResumeProgress, Id, JoinRequest, NewFileConfirm,
-        ReceiverUpdate, RelayUpdate, ResumeState, file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage,
-        relay_service_client::RelayServiceClient, relay_update::RelayMessage, sender_update::SenderMessage,
+        BreakPointConfirm, Character, ClientType, Confirm, Done, FileConfirm, FileResumeProgress, Id, JoinRequest, NewFileConfirm, ReceiverUpdate, RelayUpdate,
+        ResumeState, file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
+        relay_update::RelayMessage, sender_update::SenderMessage,
     },
     utils::{
         fs::{missing_chunks, safe_join_relative_path},
@@ -35,8 +35,8 @@ use flash_cat_common::{
 use flash_cat_relay::built_info;
 
 use crate::{
-    BreakPoint, FileDuplication, PING_INTERVAL, Progress, ReceiverConfirm, ReceiverInteractionMessage, RecvNewFile, RelayType, SendFilesRequest, get_endpoint,
-    normalize_relay_endpoint, send_msg_to_relay,
+    BreakPoint, FileDuplication, PING_INTERVAL, Progress, ReceiverConfirm, ReceiverInteractionMessage, RecvNewFile, RelayType, SendFilesRequest,
+    close_relay_session, close_relay_session_at, get_endpoint, normalize_relay_endpoint, send_msg_to_relay,
 };
 
 /// Receiver stream
@@ -137,19 +137,26 @@ impl FlashCatReceiver {
         receiver_stream_tx: mpsc::Sender<ReceiverInteractionMessage>,
         shutdown: Shutdown,
     ) -> Result<()> {
-        let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
+        let mut client = tokio::select! {
+            _ = shutdown.wait() => return Ok(()),
+            result = RelayServiceClient::connect(endpoint.clone()) => result?,
+        };
 
-        let resp = match client
-            .join(JoinRequest {
-                id: Some(Id {
-                    encrypted_share_code: self.encryptor.encrypt_share_code_bytes(),
-                    character: Character::Receiver.into(),
-                }),
-                client_type: self.client_type.into(),
-                sender_local_relay: None,
-            })
-            .await
-        {
+        let join = client.join(JoinRequest {
+            id: Some(Id {
+                encrypted_share_code: self.encryptor.encrypt_share_code_bytes(),
+                character: Character::Receiver.into(),
+            }),
+            client_type: self.client_type.into(),
+            sender_local_relay: None,
+        });
+        let resp = match tokio::select! {
+            _ = shutdown.wait() => {
+                close_relay_session_at(&endpoint, self.encryptor.encrypt_share_code_bytes()).await;
+                return Ok(());
+            }
+            result = join => result,
+        } {
             Ok(resp) => resp,
             Err(status) => {
                 let _ = Self::send_msg_to_stream(
@@ -290,7 +297,13 @@ impl FlashCatReceiver {
         output_dir: PathBuf,
         shutdown: Shutdown,
     ) -> Result<()> {
-        let (mut client, mut tx, mut messages) = Self::establish_channel(&encryptor, &endpoint).await?;
+        let (mut client, mut tx, mut messages) = tokio::select! {
+            _ = shutdown.wait() => {
+                close_relay_session_at(&endpoint, encryptor.encrypt_share_code_bytes()).await;
+                return Ok(());
+            }
+            result = Self::establish_channel(&encryptor, &endpoint) => result?,
+        };
 
         let mut recv_files: HashMap<u64, RecvFile> = HashMap::new();
 
@@ -299,10 +312,7 @@ impl FlashCatReceiver {
         loop {
             let message = tokio::select! {
                 _ = shutdown.wait() => {
-                    let _ = client.close(CloseRequest {
-                        encrypted_share_code: encryptor.encrypt_share_code_bytes(),
-                    })
-                    .await;
+                    close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
                     return Ok(());
                 }
                 _ = ping_interval.tick() => {
@@ -416,6 +426,7 @@ impl FlashCatReceiver {
                         }
                         Some(Err(_)) | None => {
                             if shutdown.is_terminated() {
+                                close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
                                 return Ok(());
                             }
 
@@ -434,14 +445,28 @@ impl FlashCatReceiver {
                                     )),
                                 )
                                 .await;
-                                tokio::time::sleep(delay).await;
+                                tokio::select! {
+                                    _ = shutdown.wait() => {
+                                        close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
+                                        return Ok(());
+                                    }
+                                    _ = tokio::time::sleep(delay) => (),
+                                }
                                 reconnect_attempt += 1;
 
                                 if shutdown.is_terminated() {
+                                    close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
                                     return Ok(());
                                 }
 
-                                match Self::establish_channel(&encryptor, &endpoint).await {
+                                let reconnect = tokio::select! {
+                                    _ = shutdown.wait() => {
+                                        close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
+                                        return Ok(());
+                                    }
+                                    result = Self::establish_channel(&encryptor, &endpoint) => result,
+                                };
+                                match reconnect {
                                     Ok(result) => break result,
                                     Err(e) => {
                                         let _ = Self::send_msg_to_stream(
@@ -658,6 +683,7 @@ impl FlashCatReceiver {
                 }
                 RelayMessage::Terminated(_) => {
                     Self::send_msg_to_stream(receiver_stream_tx, ReceiverInteractionMessage::OtherClose).await?;
+                    return Ok(());
                 }
                 RelayMessage::Ping(_) => (),
                 RelayMessage::Pong(_) => (),

@@ -180,13 +180,9 @@ impl RelayService for GrpcServer {
     ) -> RR<CloseResponse> {
         let request = request.into_inner();
         let session_code = String::from_utf8_lossy(request.encrypted_share_code.as_ref()).to_string();
-        if let Some(session) = self.0.lookup(&session_code) {
-            if let Err(e) = session.broadcast(RelayMessage::Terminated(Terminated {})).await {
-                error!("broadcast failed: {e}");
-            }
-        }
-        // wait for broadcast message send to end
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Closing must not wait on either participant's bounded update queue. A
+        // stalled/disconnected client can fill its queue and used to prevent the
+        // other participant from ever being notified.
         self.0.close_session(&session_code);
 
         Ok(Response::new(CloseResponse {}))
@@ -227,7 +223,9 @@ async fn handle_streaming(
             }
             // Exit on a session shutdown signal.
             _ = session.terminated() => {
-                send_err(tx, "disconnecting because session terminated".into()).await;
+                // Each connection gets the termination directly, so one stalled
+                // participant cannot block delivery to the other participant.
+                send_msg(tx, RelayMessage::Terminated(Terminated {})).await;
                 return Ok(());
             }
         }
@@ -250,8 +248,18 @@ async fn handle_update(
             if let RelayMessage::Ping(_) = relay_message {
                 return send_msg(tx, RelayMessage::Pong(0)).await;
             }
-            if let Err(_) = update_tx.send(relay_message).await {
-                return false;
+            tokio::select! {
+                result = update_tx.send(relay_message) => {
+                    if result.is_err() {
+                        return false;
+                    }
+                }
+                _ = session.terminated() => {
+                    // Forwarding can be blocked by a full peer queue. Notify this
+                    // client directly instead of waiting for that queue to drain.
+                    send_msg(tx, RelayMessage::Terminated(Terminated {})).await;
+                    return false;
+                }
             }
         }
         None => (),

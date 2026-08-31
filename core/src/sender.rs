@@ -24,8 +24,8 @@ use flash_cat_common::{
     consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY, RELAY_CHANNEL_CAPACITY, SEND_BUFF_SIZE},
     crypt::encryptor::Encryptor,
     proto::{
-        BreakPoint, Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, FileData, FileDone, Id, JoinRequest, NewFileRequest, RelayUpdate,
-        SendRequest, SenderUpdate, file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
+        BreakPoint, Character, ClientType, Confirm, Done, FileConfirm, FileData, FileDone, Id, JoinRequest, NewFileRequest, RelayUpdate, SendRequest,
+        SenderUpdate, file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
         relay_update::RelayMessage, sender_update::SenderMessage,
     },
     utils::{
@@ -35,7 +35,10 @@ use flash_cat_common::{
 };
 use flash_cat_relay::{built_info, relay::Relay};
 
-use crate::{PING_INTERVAL, Progress, RelayType, SenderInteractionMessage, get_endpoint, normalize_relay_endpoint, send_msg_to_relay};
+use crate::{
+    PING_INTERVAL, Progress, RelayType, SenderInteractionMessage, close_relay_session, close_relay_session_at, get_endpoint, normalize_relay_endpoint,
+    send_msg_to_relay,
+};
 
 /// Broadcast local relay addr timeout.
 pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -295,7 +298,10 @@ impl FlashCatSender {
             sender_local_relay: None,
         });
         let resp = match tokio::select! {
-            _ = cancel.cancelled() => return Ok(()),
+            _ = cancel.cancelled() => {
+                close_relay_session_at(&endpoint, self.encryptor.encrypt_share_code_bytes()).await;
+                return Ok(());
+            }
             result = join => result,
         } {
             Ok(resp) => resp,
@@ -417,7 +423,10 @@ impl FlashCatSender {
     ) -> Result<()> {
         let cancel = lifecycle.relay_token(&relay_type);
         let (mut client, mut tx, mut messages, mut confirm_tx, mut confirm_rx) = tokio::select! {
-            _ = cancel.cancelled() => return Ok(()),
+            _ = cancel.cancelled() => {
+                close_relay_session_at(&endpoint, encryptor.encrypt_share_code_bytes()).await;
+                return Ok(());
+            }
             result = Self::establish_channel(&encryptor, &endpoint) => result?,
         };
 
@@ -429,10 +438,7 @@ impl FlashCatSender {
             let message = tokio::select! {
                 _ = cancel.cancelled() => {
                     send_files_cancel.cancel();
-                    let close = client.close(CloseRequest {
-                        encrypted_share_code: encryptor.encrypt_share_code_bytes(),
-                    });
-                    let _ = tokio::time::timeout(Duration::from_secs(1), close).await;
+                    close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
                     return Ok(());
                 }
                 _ = ping_interval.tick() => {
@@ -452,6 +458,7 @@ impl FlashCatSender {
                         }
                         Some(Err(_)) | None => {
                             if cancel.is_cancelled() {
+                                close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
                                 return Ok(());
                             }
                             send_files_cancel.cancel();
@@ -472,17 +479,24 @@ impl FlashCatSender {
                                 )
                                 .await;
                                 tokio::select! {
-                                    _ = cancel.cancelled() => return Ok(()),
+                                    _ = cancel.cancelled() => {
+                                        close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
+                                        return Ok(());
+                                    }
                                     _ = tokio::time::sleep(delay) => (),
                                 }
                                 reconnect_attempt += 1;
 
                                 if cancel.is_cancelled() {
+                                    close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
                                     return Ok(());
                                 }
 
                                 let reconnect = tokio::select! {
-                                    _ = cancel.cancelled() => return Ok(()),
+                                    _ = cancel.cancelled() => {
+                                        close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
+                                        return Ok(());
+                                    }
                                     result = Self::establish_channel(&encryptor, &endpoint) => result,
                                 };
                                 match reconnect {
@@ -651,6 +665,7 @@ impl FlashCatSender {
                 }
                 RelayMessage::Terminated(_) => {
                     Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::OtherClose).await?;
+                    return Ok(());
                 }
                 RelayMessage::Ping(_) => (),
                 RelayMessage::Pong(_) => (),

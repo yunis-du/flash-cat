@@ -370,8 +370,15 @@ impl Render for SendView {
                                                 }
                                             }
                                             SenderInteractionMessage::OtherClose => {
-                                                // Handle other side close
+                                                if let Some(sender) = view.flash_cat_sender.take() {
+                                                    sender.shutdown();
+                                                }
                                                 view.notification = NotificationType::Message("Receiver disconnected".to_string());
+                                                view.send_state = if view.selected_files.is_empty() {
+                                                    SendState::Idle
+                                                } else {
+                                                    SendState::FileSelected
+                                                };
                                                 return true;
                                             }
                                             SenderInteractionMessage::SendDone => {

@@ -3,14 +3,14 @@ use std::{net::SocketAddr, time::Duration};
 use anyhow::Result;
 use bytes::Bytes;
 use tokio::sync::mpsc;
-use tonic::transport::Endpoint;
+use tonic::transport::{Channel, Endpoint};
 
 use flash_cat_common::{
     consts::{
         DEFAULT_CONNECT_TIMEOUT, DEFAULT_HTTP2_KEEPALIVE_INTERVAL, DEFAULT_HTTP2_KEEPALIVE_TIMEOUT, DEFAULT_TCP_KEEPALIVE, INITIAL_WINDOW_SIZE,
         MAX_RECONNECT_RETRIES, RECONNECT_BASE_DELAY, RECONNECT_MAX_DELAY,
     },
-    proto::{RelayUpdate, relay_update::RelayMessage},
+    proto::{CloseRequest, RelayUpdate, relay_service_client::RelayServiceClient, relay_update::RelayMessage},
 };
 
 pub mod receiver;
@@ -125,6 +125,32 @@ fn normalize_relay_endpoint(relay: String) -> String {
         Ok(addr) => format!("http://{addr}"),
         Err(_) => relay,
     }
+}
+
+async fn close_relay_session(
+    client: &mut RelayServiceClient<Channel>,
+    encrypted_share_code: Bytes,
+) {
+    let close = client.close(CloseRequest {
+        encrypted_share_code,
+    });
+    let _ = tokio::time::timeout(Duration::from_secs(1), close).await;
+}
+
+async fn close_relay_session_at(
+    endpoint: &Endpoint,
+    encrypted_share_code: Bytes,
+) {
+    let close = async {
+        let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
+        client
+            .close(CloseRequest {
+                encrypted_share_code,
+            })
+            .await?;
+        Result::<()>::Ok(())
+    };
+    let _ = tokio::time::timeout(Duration::from_secs(1), close).await;
 }
 
 /// Calculate reconnect delay with exponential backoff and jitter.
