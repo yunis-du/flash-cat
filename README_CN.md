@@ -101,8 +101,8 @@ Share code is: xx-xxxx-xxxx
 flash-cat recv xx-xxxx-xxxx --relay 127.0.0.1:6880
 ```
 
-### 通过环境变量
-发送:
+### 通过环境变量（仅发送端）
+发送端可通过环境变量指定中继：
 ```bash
 export FLASH_CAT_RELAY=127.0.0.1:6880
 flash-cat send files or folder
@@ -111,8 +111,4 @@ flash-cat send files or folder
 Share code is: xx-xxxx-xxxx
 ...
 ```
-接收:
-```bash
-export FLASH_CAT_RELAY=127.0.0.1:6880
-flash-cat recv xx-xxxx-xxxx
-```
+接收端不会读取 `FLASH_CAT_RELAY`。通过私有中继接收时，请显式传入 `--relay`。

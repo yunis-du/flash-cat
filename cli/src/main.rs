@@ -64,7 +64,7 @@ struct RecvCmd {
     share_code: String,
 
     /// Relay address (default: public relay [https://flashcat.yunisdu.com])
-    #[clap(long, env = "FLASH_CAT_RELAY")]
+    #[clap(long)]
     relay: Option<String>,
 
     /// The save path of the received file(s) or folder(s)

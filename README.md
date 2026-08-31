@@ -103,8 +103,8 @@ receive:
 flash-cat recv xx-xxxx-xxxx --relay 127.0.0.1:6880
 ```
 
-### environmental variable
-send:
+### Environment variable (sender only)
+The sender can specify a relay through the environment variable:
 ```bash
 export FLASH_CAT_RELAY=127.0.0.1:6880
 flash-cat send files or folder
@@ -113,8 +113,4 @@ flash-cat send files or folder
 Share code is: xx-xxxx-xxxx
 ...
 ```
-receive:
-```bash
-export FLASH_CAT_RELAY=127.0.0.1:6880
-flash-cat recv xx-xxxx-xxxx
-```
+The receiver does not read `FLASH_CAT_RELAY`. To receive through a private relay, pass `--relay` explicitly.
