@@ -222,7 +222,13 @@ impl FlashCatSender {
         tokio::spawn(async move {
             let mut net_scout = NetScout::new(match_content, BROADCAST_TIMEOUT, shutdown.clone());
             if let Err(e) = net_scout.broadcast(local_relay_port).await {
-                let _ = &sender_stream_tx.send(SenderInteractionMessage::Error(format!("broadcast error {}", e.to_string()))).await;
+                // LAN discovery is an optional optimization. TUN-based VPNs commonly
+                // reject broadcast traffic, but the public relay remains usable.
+                let _ = &sender_stream_tx
+                    .send(SenderInteractionMessage::Message(format!(
+                        "LAN discovery unavailable; continuing through relay: {e}"
+                    )))
+                    .await;
             }
         });
     }
@@ -238,7 +244,7 @@ impl FlashCatSender {
     ) -> Result<()> {
         let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
 
-        let sender_local_relay = if relay_type == RelayType::Public && local_relay_port.is_some() {
+        let sender_local_relay = if relay_type == RelayType::Public && self.lan_broadcast && local_relay_port.is_some() {
             match get_local_ip() {
                 Some(ip) => Some(RelayInfo {
                     relay_ip: ip.to_string(),
