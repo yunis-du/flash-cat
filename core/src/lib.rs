@@ -29,6 +29,7 @@ pub enum SenderInteractionMessage {
     FileProgress(Progress),
     FileProgressFinish(u64),
     OtherClose,
+    ReconnectFailed(String),
     SendDone,
     Completed,
 }
@@ -44,6 +45,7 @@ pub enum ReceiverInteractionMessage {
     FileProgress(Progress),
     FileProgressFinish(u64),
     OtherClose,
+    ReconnectFailed(String),
     ReceiveDone,
 }
 

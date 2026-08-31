@@ -381,6 +381,18 @@ impl Render for SendView {
                                                 };
                                                 return true;
                                             }
+                                            SenderInteractionMessage::ReconnectFailed(error) => {
+                                                if let Some(sender) = view.flash_cat_sender.take() {
+                                                    sender.shutdown();
+                                                }
+                                                view.notification = NotificationType::Error(error);
+                                                view.send_state = if view.selected_files.is_empty() {
+                                                    SendState::Idle
+                                                } else {
+                                                    SendState::FileSelected
+                                                };
+                                                return true;
+                                            }
                                             SenderInteractionMessage::SendDone => {
                                                 // Sending complete, waiting for confirmation
                                             }

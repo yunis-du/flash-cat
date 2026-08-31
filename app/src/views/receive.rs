@@ -289,6 +289,7 @@ impl Render for ReceiveView {
                                                         if let Some(pb) = view.progress_bars.iter_mut().find(|pb| pb.get_file_id() == bp.file_id) {
                                                             pb.set_progress(bp.position);
                                                         }
+                                                        view.send_confirm(ReceiverConfirm::BreakPointConfirm((true, bp.file_id, bp.position)));
                                                     }
                                                     ReceiverInteractionMessage::FileProgress(progress) => {
                                                         if let Some(pb) = view.progress_bars.iter_mut().find(|pb| pb.get_file_id() == progress.file_id) {
@@ -305,6 +306,15 @@ impl Render for ReceiveView {
                                                             receiver.shutdown();
                                                         }
                                                         view.notification = NotificationType::Message("Sender disconnected".to_string());
+                                                        view.receive_state = ReceiveState::Idle;
+                                                        view.progress_bars.clear();
+                                                        return true;
+                                                    }
+                                                    ReceiverInteractionMessage::ReconnectFailed(error) => {
+                                                        if let Some(receiver) = view.flash_cat_receiver.take() {
+                                                            receiver.shutdown();
+                                                        }
+                                                        view.notification = NotificationType::Error(error);
                                                         view.receive_state = ReceiveState::Idle;
                                                         view.progress_bars.clear();
                                                         return true;

@@ -97,15 +97,17 @@ impl FlashCatReceiver {
                 self.connect_relay(RelayType::Public, endpoint, receiver_stream_tx.clone(), self.shutdown.clone()).await?;
             }
         }
-        // resolve shutdown when receiver_stream_rx is no message will cause panic
-        let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
         Ok(Box::pin(async_stream::stream! {
-            while !self.shutdown.is_terminated() {
+            loop {
                 tokio::select! {
-                    Some(sender_stream) = receiver_stream_rx.recv() => {
-                        yield sender_stream;
+                    biased;
+                    message = receiver_stream_rx.recv() => {
+                        match message {
+                            Some(message) => yield message,
+                            None => break,
+                        }
                     }
-                    _ = interval.tick() =>(),
+                    _ = self.shutdown.wait() => break,
                 }
             }
         }))
@@ -305,7 +307,8 @@ impl FlashCatReceiver {
             result = Self::establish_channel(&encryptor, &endpoint) => result?,
         };
 
-        let mut recv_files: HashMap<u64, RecvFile> = HashMap::new();
+        let mut file_states: HashMap<u64, ReceiveFileState> = HashMap::new();
+        let mut share_confirm = None;
 
         let mut ping_interval = tokio::time::interval(PING_INTERVAL);
         let mut reconnect_attempt = 0u32;
@@ -322,6 +325,7 @@ impl FlashCatReceiver {
                 Ok(confirm) = confirm_rx.recv() => {
                     match confirm {
                         ReceiverConfirm::ReceiveConfirm(accept) => {
+                            share_confirm = Some(accept);
                             if accept {
                                 let share_accept = RelayMessage::Receiver(ReceiverUpdate {
                                     receiver_message: Some(ReceiverMessage::ShareConfirm(
@@ -367,9 +371,16 @@ impl FlashCatReceiver {
                                 })
                             };
                             send_msg_to_relay(&tx, file_confirm).await?;
-                            if !accept {
-                                if let Some(mut recv_file) = recv_files.remove(&file_id) {
-                                    recv_file.finish().await?;
+                            if let Some(state) = file_states.get_mut(&file_id) {
+                                if accept {
+                                    let recv_file = state.file.as_mut().ok_or_else(|| anyhow!("receive file is not open"))?;
+                                    recv_file.restart().await?;
+                                    state.received_bytes = 0;
+                                } else {
+                                    if let Some(mut recv_file) = state.file.take() {
+                                        recv_file.finish().await?;
+                                    }
+                                    state.completed = true;
                                 }
                             }
                         }
@@ -405,8 +416,10 @@ impl FlashCatReceiver {
                             };
                             send_msg_to_relay(&tx, break_point_confirm).await?;
                             if !accept {
-                                if let Some(recv_file) = recv_files.get_mut(&file_id) {
+                                if let Some(state) = file_states.get_mut(&file_id) {
+                                    let recv_file = state.file.as_mut().ok_or_else(|| anyhow!("receive file is not open"))?;
                                     recv_file.restart().await?;
+                                    state.received_bytes = 0;
                                 }
                             }
                         }
@@ -432,7 +445,14 @@ impl FlashCatReceiver {
 
                             let result = loop {
                                 if !crate::should_retry(reconnect_attempt) {
-                                    bail!("max reconnect retries exceeded");
+                                    let message = "max reconnect retries exceeded".to_string();
+                                    Self::send_msg_to_stream(
+                                        receiver_stream_tx,
+                                        ReceiverInteractionMessage::ReconnectFailed(message),
+                                    )
+                                    .await?;
+                                    shutdown.shutdown();
+                                    return Ok(());
                                 }
                                 let delay = crate::reconnect_delay(reconnect_attempt);
                                 let _ = Self::send_msg_to_stream(
@@ -484,6 +504,19 @@ impl FlashCatReceiver {
                             client = new_client;
                             tx = new_tx;
                             messages = new_messages;
+                            if let Some(accept) = share_confirm {
+                                send_msg_to_relay(
+                                    &tx,
+                                    RelayMessage::Receiver(ReceiverUpdate {
+                                        receiver_message: Some(ReceiverMessage::ShareConfirm(if accept {
+                                            Confirm::Accept.into()
+                                        } else {
+                                            Confirm::Reject.into()
+                                        })),
+                                    }),
+                                )
+                                .await?;
+                            }
                             reconnect_attempt = 0;
                             ping_interval = tokio::time::interval(PING_INTERVAL);
                             let _ = Self::send_msg_to_stream(
@@ -529,6 +562,7 @@ impl FlashCatReceiver {
                                 let absolute_path = safe_join_relative_path(&output_dir, new_file_req.relative_path.as_str())?;
                                 if new_file_req.is_empty_dir {
                                     tokio::fs::create_dir_all(&absolute_path).await?;
+                                    file_states.insert(new_file_req.file_id, ReceiveFileState::completed(0));
                                     send_msg_to_relay(&tx, accept_msg).await?;
                                     continue;
                                 }
@@ -548,25 +582,34 @@ impl FlashCatReceiver {
                                     let recv_file_len = fs::metadata(&absolute_path).await?.len();
 
                                     let recv_file = RecvFile::new(fs::File::options().write(true).read(true).open(&absolute_path).await?, 0).await?;
-                                    recv_files.insert(new_file_req.file_id, recv_file);
+                                    file_states.insert(new_file_req.file_id, ReceiveFileState::active(recv_file, 0));
 
-                                    if recv_file_len == new_file_req.total_size {
-                                        // Breakpoint exists, continue receiving
-                                        if let Ok((saved_chunks, missing_chunks, percent)) = missing_chunks(&absolute_path, SEND_BUFF_SIZE) {
-                                            if missing_chunks > 0 && saved_chunks > 0 && percent > 0.0 {
-                                                Self::send_msg_to_stream(
-                                                    receiver_stream_tx,
-                                                    ReceiverInteractionMessage::BreakPoint(BreakPoint {
-                                                        file_id: new_file_req.file_id,
-                                                        filename: new_file_req.filename.clone(),
-                                                        position: (saved_chunks * SEND_BUFF_SIZE) as u64,
-                                                        percent,
-                                                    }),
-                                                )
-                                                .await?;
-                                                continue;
-                                            }
+                                    let direct_position = (recv_file_len > 0 && recv_file_len < new_file_req.total_size).then_some(recv_file_len);
+                                    let legacy_position = if recv_file_len == new_file_req.total_size {
+                                        missing_chunks(&absolute_path, SEND_BUFF_SIZE).ok().and_then(|(saved_chunks, missing_chunks, _)| {
+                                            (missing_chunks > 0 && saved_chunks > 0)
+                                                .then_some(((saved_chunks * SEND_BUFF_SIZE) as u64).min(new_file_req.total_size))
+                                        })
+                                    } else {
+                                        None
+                                    };
+
+                                    if let Some(position) = direct_position.or(legacy_position) {
+                                        if let Some(state) = file_states.get_mut(&new_file_req.file_id) {
+                                            state.received_bytes = position;
                                         }
+                                        let percent = position as f64 / new_file_req.total_size as f64 * 100.0;
+                                        Self::send_msg_to_stream(
+                                            receiver_stream_tx,
+                                            ReceiverInteractionMessage::BreakPoint(BreakPoint {
+                                                file_id: new_file_req.file_id,
+                                                filename: new_file_req.filename.clone(),
+                                                position,
+                                                percent,
+                                            }),
+                                        )
+                                        .await?;
+                                        continue;
                                     }
 
                                     Self::send_msg_to_stream(
@@ -597,23 +640,20 @@ impl FlashCatReceiver {
                                     }
 
                                     let recv_file = RecvFile::new(file_instance, 0).await?;
-                                    recv_files.insert(new_file_req.file_id, recv_file);
+                                    file_states.insert(new_file_req.file_id, ReceiveFileState::active(recv_file, 0));
 
                                     send_msg_to_relay(&tx, accept_msg).await?;
                                 }
                             }
                             SenderMessage::BreakPoint(break_point) => {
-                                if !recv_files.contains_key(&break_point.file_id) {
-                                    bail!("receive file failed");
-                                }
-                                let recv_file = recv_files.get_mut(&break_point.file_id).unwrap();
+                                let state = file_states.get_mut(&break_point.file_id).ok_or_else(|| anyhow!("receive file failed"))?;
+                                let recv_file = state.file.as_mut().ok_or_else(|| anyhow!("receive file is not open"))?;
                                 recv_file.seek(break_point.position).await?;
+                                state.received_bytes = break_point.position;
                             }
                             SenderMessage::FileData(file_data) => {
-                                if !recv_files.contains_key(&file_data.file_id) {
-                                    bail!("receive file failed");
-                                }
-                                let recv_file = recv_files.get_mut(&file_data.file_id).unwrap();
+                                let state = file_states.get_mut(&file_data.file_id).ok_or_else(|| anyhow!("receive file failed"))?;
+                                let recv_file = state.file.as_mut().ok_or_else(|| anyhow!("receive file is not open"))?;
                                 let encryptor = encryptor.clone();
                                 let data = match encryptor.decrypt(file_data.data.as_ref()) {
                                     Ok(data) => data,
@@ -622,21 +662,21 @@ impl FlashCatReceiver {
                                     }
                                 };
                                 recv_file.write(data).await?;
+                                state.received_bytes = recv_file.get_progress();
                                 Self::send_msg_to_stream(
                                     receiver_stream_tx,
                                     ReceiverInteractionMessage::FileProgress(Progress {
                                         file_id: file_data.file_id,
-                                        position: recv_file.get_progress(),
+                                        position: state.received_bytes,
                                     }),
                                 )
                                 .await?;
                             }
                             SenderMessage::FileDone(file_done) => {
-                                if !recv_files.contains_key(&file_done.file_id) {
-                                    bail!("receive file failed");
-                                }
-                                let mut recv_file = recv_files.remove(&file_done.file_id).unwrap();
+                                let state = file_states.get_mut(&file_done.file_id).ok_or_else(|| anyhow!("receive file failed"))?;
+                                let mut recv_file = state.file.take().ok_or_else(|| anyhow!("receive file is not open"))?;
                                 recv_file.finish().await?; // notify and wait for writer Task
+                                state.completed = true;
                                 Self::send_msg_to_stream(
                                     receiver_stream_tx,
                                     ReceiverInteractionMessage::FileProgressFinish(file_done.file_id),
@@ -646,11 +686,11 @@ impl FlashCatReceiver {
                             SenderMessage::ResumeRequest(_) => {
                                 // Sender reconnected and asks for current file progress
                                 let mut files = Vec::new();
-                                for (&file_id, recv_file) in recv_files.iter() {
+                                for (&file_id, state) in file_states.iter() {
                                     files.push(FileResumeProgress {
                                         file_id,
-                                        received_bytes: recv_file.get_progress(),
-                                        completed: false,
+                                        received_bytes: state.received_bytes,
+                                        completed: state.completed,
                                     });
                                 }
                                 // Reply with ResumeState
@@ -714,6 +754,33 @@ enum FileWriteCommand {
     Seek(u64, oneshot::Sender<Result<u64, String>>),
     Restart(oneshot::Sender<Result<u64, String>>),
     Finish,
+}
+
+struct ReceiveFileState {
+    file: Option<RecvFile>,
+    received_bytes: u64,
+    completed: bool,
+}
+
+impl ReceiveFileState {
+    fn active(
+        file: RecvFile,
+        received_bytes: u64,
+    ) -> Self {
+        Self {
+            file: Some(file),
+            received_bytes,
+            completed: false,
+        }
+    }
+
+    fn completed(received_bytes: u64) -> Self {
+        Self {
+            file: None,
+            received_bytes,
+            completed: true,
+        }
+    }
 }
 
 struct RecvFile {
@@ -838,9 +905,7 @@ impl RecvFile {
     async fn finish(&mut self) -> Result<()> {
         self.tx.send(FileWriteCommand::Finish).await?;
         if let Some(handle) = self.writer_handle.take() {
-            if let Err(e) = handle.await {
-                bail!("writer task failed: {}", e);
-            }
+            handle.await.map_err(|e| anyhow!("writer task failed: {e}"))??;
         }
         Ok(())
     }

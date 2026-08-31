@@ -3,12 +3,53 @@ use std::time::Instant;
 use anyhow::Result;
 use bytes::Bytes;
 use parking_lot::Mutex;
+use tokio::sync::Mutex as AsyncMutex;
 
 use flash_cat_common::{
     Shutdown,
     consts::RELAY_CHANNEL_CAPACITY,
-    proto::{RelayInfo, relay_update::RelayMessage},
+    proto::{Character, RelayInfo, relay_update::RelayMessage},
 };
+
+#[derive(Debug)]
+struct ConnectionSlot {
+    generation: u64,
+    cancel: Shutdown,
+    done: Shutdown,
+    active: bool,
+}
+
+impl ConnectionSlot {
+    fn new() -> Self {
+        Self {
+            generation: 0,
+            cancel: Shutdown::new(),
+            done: Shutdown::new(),
+            active: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectionLease {
+    generation: u64,
+    cancel: Shutdown,
+    done: Shutdown,
+}
+
+impl ConnectionLease {
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub async fn superseded(&self) {
+        self.cancel.wait().await;
+    }
+
+    pub fn finish(&self) {
+        self.done.shutdown();
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Metadata {
@@ -49,6 +90,8 @@ pub struct Session {
     user_pair: SessionUserPair,
     /// Timestamp of the last backend client message from an active connection.
     last_accessed: Mutex<Instant>,
+    sharer_connection: AsyncMutex<ConnectionSlot>,
+    recipient_connection: AsyncMutex<ConnectionSlot>,
     /// Set when this session has been closed and removed.
     ///
     /// This is used to ensure that we don't send any more messages to the
@@ -63,6 +106,8 @@ impl Session {
             id,
             metadata,
             last_accessed: Mutex::new(Instant::now()),
+            sharer_connection: AsyncMutex::new(ConnectionSlot::new()),
+            recipient_connection: AsyncMutex::new(ConnectionSlot::new()),
             user_pair: SessionUserPair::new(),
             shutdown: Shutdown::new(),
         }
@@ -82,6 +127,31 @@ impl Session {
 
     pub fn last_accessed(&self) -> Instant {
         *self.last_accessed.lock()
+    }
+
+    pub async fn register_connection(
+        &self,
+        character: Character,
+    ) -> ConnectionLease {
+        let slot = match character {
+            Character::Sender => &self.sharer_connection,
+            Character::Receiver => &self.recipient_connection,
+        };
+        let mut slot = slot.lock().await;
+        if slot.active {
+            slot.cancel.shutdown();
+            slot.done.wait().await;
+        }
+
+        slot.generation = slot.generation.wrapping_add(1);
+        slot.cancel = Shutdown::new();
+        slot.done = Shutdown::new();
+        slot.active = true;
+        ConnectionLease {
+            generation: slot.generation,
+            cancel: slot.cancel.clone(),
+            done: slot.done.clone(),
+        }
     }
 
     pub async fn send_to_share(
@@ -106,15 +176,6 @@ impl Session {
 
     pub async fn recv_from_recipient(&self) -> Result<RelayMessage> {
         Ok(self.user_pair.recipient_update_rx.recv().await?)
-    }
-
-    pub async fn broadcast(
-        &self,
-        msg: RelayMessage,
-    ) -> Result<()> {
-        self.user_pair.sharer_update_tx.send(msg.clone()).await?;
-        self.user_pair.recipient_update_tx.send(msg).await?;
-        Ok(())
     }
 
     pub fn sharer_update_tx(&self) -> &async_channel::Sender<RelayMessage> {

@@ -98,6 +98,17 @@ impl SenderLifecycle {
     fn cancel(&self) {
         self.root.cancel();
     }
+
+    fn is_selected(
+        &self,
+        relay_type: &RelayType,
+    ) -> bool {
+        match relay_type {
+            RelayType::Specify => true,
+            RelayType::Local => self.selected_local.get().copied() == Some(true),
+            RelayType::Public => self.selected_local.get().copied() == Some(false),
+        }
+    }
 }
 
 impl Default for SenderLifecycle {
@@ -203,6 +214,7 @@ impl FlashCatSender {
         Ok(Box::pin(async_stream::stream! {
             loop {
                 tokio::select! {
+                    biased;
                     message = sender_stream_rx.recv() => {
                         match message {
                             Some(message) => yield message,
@@ -434,10 +446,13 @@ impl FlashCatSender {
         let mut reconnect_attempt = 0u32;
         let mut is_first_connect = true;
         let mut send_files_cancel = cancel.child_token();
+        let mut send_task = None;
+        let mut request_sent = false;
+        let mut share_accepted = false;
         loop {
             let message = tokio::select! {
                 _ = cancel.cancelled() => {
-                    send_files_cancel.cancel();
+                    Self::stop_send_task(&mut send_task, &send_files_cancel).await;
                     close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
                     return Ok(());
                 }
@@ -461,11 +476,21 @@ impl FlashCatSender {
                                 close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
                                 return Ok(());
                             }
-                            send_files_cancel.cancel();
+                            Self::stop_send_task(&mut send_task, &send_files_cancel).await;
 
                             let result = loop {
                                 if !crate::should_retry(reconnect_attempt) {
-                                    bail!("max reconnect retries exceeded");
+                                    let message = "max reconnect retries exceeded".to_string();
+                                    if lifecycle.is_selected(&relay_type) {
+                                        Self::send_msg_to_stream(
+                                            sender_stream_tx,
+                                            SenderInteractionMessage::ReconnectFailed(message),
+                                        )
+                                        .await?;
+                                        lifecycle.cancel();
+                                        return Ok(());
+                                    }
+                                    bail!(message);
                                 }
                                 let delay = crate::reconnect_delay(reconnect_attempt);
                                 let _ = Self::send_msg_to_stream(
@@ -544,7 +569,7 @@ impl FlashCatSender {
                 }
                 RelayMessage::Joined(_) => {
                     // After reconnection, send ResumeRequest instead of waiting for Ready
-                    if !is_first_connect {
+                    if !is_first_connect && share_accepted {
                         send_msg_to_relay(
                             &tx,
                             RelayMessage::Sender(SenderUpdate {
@@ -558,18 +583,32 @@ impl FlashCatSender {
                     if relay_type != RelayType::Specify && !lifecycle.select_path(ready.local_relay) {
                         return Ok(());
                     }
-                    send_msg_to_relay(
-                        &tx,
-                        RelayMessage::Sender(SenderUpdate {
-                            sender_message: Some(SenderMessage::SendRequest(SendRequest {
-                                total_size: file_collector.total_size,
-                                num_files: file_collector.num_files,
-                                num_folders: file_collector.num_folders,
-                                max_file_name_length: file_collector.max_file_name_length as u64,
-                            })),
-                        }),
-                    )
-                    .await?;
+                    if !request_sent {
+                        request_sent = true;
+                        send_msg_to_relay(
+                            &tx,
+                            RelayMessage::Sender(SenderUpdate {
+                                sender_message: Some(SenderMessage::SendRequest(SendRequest {
+                                    total_size: file_collector.total_size,
+                                    num_files: file_collector.num_files,
+                                    num_folders: file_collector.num_folders,
+                                    max_file_name_length: file_collector.max_file_name_length as u64,
+                                })),
+                            }),
+                        )
+                        .await?;
+                    } else if share_accepted {
+                        Self::stop_send_task(&mut send_task, &send_files_cancel).await;
+                        while confirm_rx.try_recv().is_ok() {}
+                        send_files_cancel = cancel.child_token();
+                        send_msg_to_relay(
+                            &tx,
+                            RelayMessage::Sender(SenderUpdate {
+                                sender_message: Some(SenderMessage::ResumeRequest(flash_cat_common::proto::ResumeRequest {})),
+                            }),
+                        )
+                        .await?;
+                    }
                 }
                 RelayMessage::Sender(_) => {
                     Self::send_msg_to_stream(
@@ -585,13 +624,19 @@ impl FlashCatSender {
                                 if let Ok(confirm) = Confirm::try_from(share_confirm) {
                                     match confirm {
                                         Confirm::Accept => {
+                                            if share_accepted {
+                                                continue;
+                                            }
+                                            share_accepted = true;
+                                            Self::stop_send_task(&mut send_task, &send_files_cancel).await;
+                                            send_files_cancel = cancel.child_token();
                                             let encryptor = encryptor.clone();
                                             let file_collector = file_collector.clone();
                                             let tx = tx.clone();
                                             let sender_stream_tx = sender_stream_tx.clone();
                                             let notify_rx = confirm_rx.clone();
                                             let cancel = send_files_cancel.clone();
-                                            tokio::spawn(async move {
+                                            send_task = Some(tokio::spawn(async move {
                                                 if let Err(err) =
                                                     Self::send_files(encryptor, tx, file_collector, notify_rx, &sender_stream_tx, cancel, None).await
                                                 {
@@ -601,7 +646,7 @@ impl FlashCatSender {
                                                     )
                                                     .await;
                                                 }
-                                            });
+                                            }));
                                         }
                                         Confirm::Reject => {
                                             send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
@@ -620,6 +665,12 @@ impl FlashCatSender {
                                 confirm_tx.send(file_confirm).await?;
                             }
                             ReceiverMessage::ResumeState(resume_state) => {
+                                if !share_accepted {
+                                    continue;
+                                }
+                                Self::stop_send_task(&mut send_task, &send_files_cancel).await;
+                                while confirm_rx.try_recv().is_ok() {}
+                                send_files_cancel = cancel.child_token();
                                 let mut resume_progress = HashMap::new();
                                 for fp in resume_state.files {
                                     resume_progress.insert(fp.file_id, (fp.received_bytes, fp.completed));
@@ -630,7 +681,7 @@ impl FlashCatSender {
                                 let sender_stream_tx = sender_stream_tx.clone();
                                 let notify_rx = confirm_rx.clone();
                                 let cancel = send_files_cancel.clone();
-                                tokio::spawn(async move {
+                                send_task = Some(tokio::spawn(async move {
                                     if let Err(err) = Self::send_files(
                                         encryptor,
                                         tx,
@@ -648,7 +699,7 @@ impl FlashCatSender {
                                         )
                                         .await;
                                     }
-                                });
+                                }));
                             }
                         }
                     }
@@ -670,6 +721,17 @@ impl FlashCatSender {
                 RelayMessage::Ping(_) => (),
                 RelayMessage::Pong(_) => (),
             }
+        }
+    }
+
+    async fn stop_send_task(
+        send_task: &mut Option<tokio::task::JoinHandle<()>>,
+        cancel: &CancellationToken,
+    ) {
+        cancel.cancel();
+        if let Some(task) = send_task.take() {
+            task.abort();
+            let _ = task.await;
         }
     }
 
@@ -716,7 +778,7 @@ impl FlashCatSender {
     ) -> Result<()> {
         // Resume: partial file — send BreakPoint and stream remaining data
         if let Some((received_bytes, _)) = file_resume {
-            if received_bytes > 0 && !send_file.empty_dir {
+            if !send_file.empty_dir {
                 let _ = Self::send_msg_to_stream(
                     sender_stream_tx,
                     SenderInteractionMessage::Message(format!("Resuming file {} from {}", send_file.name, received_bytes)),

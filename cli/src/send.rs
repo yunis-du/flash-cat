@@ -112,6 +112,10 @@ impl Send {
                                 progress.println("The receive end is interrupted. exit...");
                                 self.shutdown();
                             }
+                            SenderInteractionMessage::ReconnectFailed(error) => {
+                                progress.println(&format!("Reconnect failed: {error}. exit..."));
+                                self.shutdown();
+                            }
                             SenderInteractionMessage::SendDone => {
                                 // progress.println("Send files done. waiting for the receiver to receive finish...");
                             }

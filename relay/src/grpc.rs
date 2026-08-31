@@ -16,7 +16,7 @@ use flash_cat_common::{
 use crate::{
     built_info,
     relay::RelayState,
-    session::{Metadata, Session},
+    session::{ConnectionLease, Metadata, Session},
 };
 
 #[derive(Clone)]
@@ -146,24 +146,35 @@ impl RelayService for GrpcServer {
             }
             _ => return Err(Status::invalid_argument("invalid first message")),
         };
+        let connection = session.register_connection(character).await;
 
         if let Character::Receiver = character {
-            // readly to interaction
+            // Ready for interaction.
             if let Err(e) = session
-                .broadcast(RelayMessage::Ready(Ready {
+                .send_to_share(RelayMessage::Ready(Ready {
                     local_relay: self.0.is_local_relay(),
                 }))
                 .await
             {
-                error!("broadcast failed: {e}");
+                error!("send ready to sharer failed: {e}");
             }
-            info!("receiver(addr: {remote_addr}, session_id: {}) started channel", session.id());
+            info!(
+                "receiver(addr: {remote_addr}, session_id: {}, generation: {}) started channel",
+                session.id(),
+                connection.generation()
+            );
         } else {
-            info!("sender(addr: {remote_addr}, session_id: {}) started channel", session.id());
+            info!(
+                "sender(addr: {remote_addr}, session_id: {}, generation: {}) started channel",
+                session.id(),
+                connection.generation()
+            );
         }
 
         tokio::spawn(async move {
-            if let Err(err) = handle_streaming(&tx, &session, stream, character).await {
+            let result = handle_streaming(&tx, &session, stream, character, &connection).await;
+            connection.finish();
+            if let Err(err) = result {
                 error!(
                     "connection(addr: {remote_addr}, session_id: {}) exiting early due to an error {err}",
                     session.id()
@@ -197,6 +208,7 @@ async fn handle_streaming(
     session: &Session,
     mut stream: Streaming<RelayUpdate>,
     character: Character,
+    connection: &ConnectionLease,
 ) -> Result<(), &'static str> {
     let (update_tx, update_rx) = match character {
         Character::Sender => (session.recipient_update_tx(), session.sharer_update_rx()),
@@ -204,29 +216,35 @@ async fn handle_streaming(
     };
     loop {
         tokio::select! {
+            biased;
+            _ = connection.superseded() => return Ok(()),
+            _ = session.terminated() => {
+                send_msg(tx, RelayMessage::Terminated(Terminated {})).await;
+                return Ok(());
+            }
             // Send buffered server updates to the client.
             Ok(msg) = update_rx.recv() => {
-                if !send_msg(tx, msg).await {
-                    return Err("failed to send update message");
+                tokio::select! {
+                    biased;
+                    _ = connection.superseded() => return Ok(()),
+                    _ = session.terminated() => return Ok(()),
+                    sent = send_msg(tx, msg) => {
+                        if !sent {
+                            return Err("failed to send update message");
+                        }
+                    }
                 }
             }
             // Handle incoming client messages.
             maybe_update = stream.next() => {
                 if let Some(Ok(update)) = maybe_update {
-                    if !handle_update(tx, session, update, update_tx).await {
+                    if !handle_update(tx, session, update, update_tx, connection).await {
                         return Err("error responding to client update");
                     }
                 } else {
                     // The client has hung up on their end.
                     return Ok(());
                 }
-            }
-            // Exit on a session shutdown signal.
-            _ = session.terminated() => {
-                // Each connection gets the termination directly, so one stalled
-                // participant cannot block delivery to the other participant.
-                send_msg(tx, RelayMessage::Terminated(Terminated {})).await;
-                return Ok(());
             }
         }
     }
@@ -238,17 +256,28 @@ async fn handle_update(
     session: &Session,
     update: RelayUpdate,
     update_tx: &async_channel::Sender<RelayMessage>,
+    connection: &ConnectionLease,
 ) -> bool {
     session.access();
     match update.relay_message {
         Some(relay_message) => {
             if let RelayMessage::Join(_) = relay_message {
-                return send_err(tx, "unexpected join".into()).await;
+                return tokio::select! {
+                    biased;
+                    _ = connection.superseded() => false,
+                    sent = send_err(tx, "unexpected join".into()) => sent,
+                };
             }
             if let RelayMessage::Ping(_) = relay_message {
-                return send_msg(tx, RelayMessage::Pong(0)).await;
+                return tokio::select! {
+                    biased;
+                    _ = connection.superseded() => false,
+                    sent = send_msg(tx, RelayMessage::Pong(0)) => sent,
+                };
             }
             tokio::select! {
+                biased;
+                _ = connection.superseded() => return false,
                 result = update_tx.send(relay_message) => {
                     if result.is_err() {
                         return false;

@@ -138,6 +138,10 @@ impl Receive {
                         println!("The send end is interrupted. exit...");
                         self.shutdown();
                     }
+                    ReceiverInteractionMessage::ReconnectFailed(error) => {
+                        println!("Reconnect failed: {error}. exit...");
+                        self.shutdown();
+                    }
                     ReceiverInteractionMessage::ReceiveDone => {
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                         self.shutdown();
