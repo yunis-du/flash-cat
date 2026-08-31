@@ -11,7 +11,6 @@ use flash_cat_common::{
         Character, CloseRequest, CloseResponse, JoinFailed, JoinRequest, JoinResponse, JoinSuccess, Joined, Ready, RelayInfo, RelayUpdate, Terminated,
         join_response::JoinResponseMessage, relay_service_server::RelayService, relay_update::RelayMessage,
     },
-    utils::net::get_local_ip,
 };
 
 use crate::{
@@ -39,7 +38,8 @@ impl RelayService for GrpcServer {
         &self,
         request: Request<JoinRequest>,
     ) -> RR<JoinResponse> {
-        let relay_port = match request.local_addr() {
+        let relay_local_addr = request.local_addr();
+        let relay_port = match relay_local_addr {
             Some(local_addr) => local_addr.port() as u32,
             None => 0,
         };
@@ -86,9 +86,9 @@ impl RelayService for GrpcServer {
                         relay_ip: ip.to_string(),
                         relay_port,
                     }),
-                    None => match get_local_ip() {
-                        Some(ip) => Some(RelayInfo {
-                            relay_ip: ip.to_string(),
+                    None => match relay_local_addr {
+                        Some(addr) => Some(RelayInfo {
+                            relay_ip: addr.ip().to_string(),
                             relay_port,
                         }),
                         None => None,

@@ -16,13 +16,13 @@ use flash_cat_common::{
     consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY, RELAY_CHANNEL_CAPACITY, SEND_BUFF_SIZE},
     crypt::encryptor::Encryptor,
     proto::{
-        BreakPoint, Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, FileData, FileDone, Id, JoinRequest, NewFileRequest, RelayInfo,
-        RelayUpdate, SendRequest, SenderUpdate, file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage,
-        relay_service_client::RelayServiceClient, relay_update::RelayMessage, sender_update::SenderMessage,
+        BreakPoint, Character, ClientType, CloseRequest, Confirm, Done, FileConfirm, FileData, FileDone, Id, JoinRequest, NewFileRequest, RelayUpdate,
+        SendRequest, SenderUpdate, file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
+        relay_update::RelayMessage, sender_update::SenderMessage,
     },
     utils::{
         fs::{FileCollector, FileInfo, collect_files, is_idr, paths_exist, remove_files, zip_folder},
-        net::{find_available_port, get_local_ip, net_scout::NetScout},
+        net::{find_available_port, net_scout::NetScout},
     },
 };
 use flash_cat_relay::{built_info, relay::Relay};
@@ -114,7 +114,6 @@ impl FlashCatSender {
             let endpoint = get_endpoint(specify_relay_addr)?;
             self.connect_relay(
                 RelayType::Specify,
-                None,
                 endpoint,
                 sender_stream_tx.clone(),
                 self.shutdown.clone(),
@@ -138,7 +137,6 @@ impl FlashCatSender {
             let endpoint = get_endpoint(format!("http://127.0.0.1:{local_relay_port}"))?;
             self.connect_relay(
                 RelayType::Local,
-                None,
                 endpoint,
                 sender_stream_tx.clone(),
                 self.public_relay_shutdown.clone(),
@@ -150,7 +148,6 @@ impl FlashCatSender {
             let endpoint = get_endpoint(format!("https://{PUBLIC_RELAY}"))?;
             self.connect_relay(
                 RelayType::Public,
-                Some(local_relay_port),
                 endpoint,
                 sender_stream_tx.clone(),
                 self.public_relay_shutdown.clone(),
@@ -236,25 +233,12 @@ impl FlashCatSender {
     async fn connect_relay(
         &self,
         relay_type: RelayType,
-        local_relay_port: Option<u16>,
         mut endpoint: Endpoint,
         sender_stream_tx: mpsc::Sender<SenderInteractionMessage>,
         public_or_specify_shutdown: Shutdown,
         local_relay_shutdown: Shutdown,
     ) -> Result<()> {
         let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
-
-        let sender_local_relay = if relay_type == RelayType::Public && self.lan_broadcast && local_relay_port.is_some() {
-            match get_local_ip() {
-                Some(ip) => Some(RelayInfo {
-                    relay_ip: ip.to_string(),
-                    relay_port: local_relay_port.unwrap() as u32,
-                }),
-                None => None,
-            }
-        } else {
-            None
-        };
 
         let resp = match client
             .join(JoinRequest {
@@ -263,7 +247,10 @@ impl FlashCatSender {
                     character: Character::Sender.into(),
                 }),
                 client_type: self.client_type.into(),
-                sender_local_relay,
+                // The source address for LAN discovery must come from the
+                // interface that received the broadcast. A single route-derived
+                // address is ambiguous on multi-homed and TUN-enabled hosts.
+                sender_local_relay: None,
             })
             .await
         {

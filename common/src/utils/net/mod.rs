@@ -1,4 +1,4 @@
-use std::net::{IpAddr, SocketAddr, TcpListener, ToSocketAddrs, UdpSocket};
+use std::net::{IpAddr, SocketAddr, TcpListener, ToSocketAddrs};
 
 pub mod net_scout;
 
@@ -27,15 +27,6 @@ pub fn get_domain_ip(domain: &str) -> Option<IpAddr> {
         },
         Err(_) => None,
     }
-}
-
-/// Get local IP address.
-pub fn get_local_ip() -> Option<IpAddr> {
-    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("8.8.8.8:53").ok()?;
-
-    let addr = socket.local_addr().ok()?;
-    Some(addr.ip())
 }
 
 /// Extract the domain or IP address from the given string.

@@ -18,6 +18,7 @@ tonic-prost.workspace = true
 log.workspace = true
 rand.workspace = true
 indicatif.workspace = true
+if-addrs.workspace = true
 zip.workspace = true
 walkdir = "2.5.0"
 sha2 = "0.10.8"
