@@ -20,14 +20,14 @@ const BROADCAST_INTERVAL: Duration = Duration::from_secs(1);
 /// Broadcast Discovery
 pub struct NetScout {
     match_content: Vec<u8>,
-    timeout: Duration,
+    timeout: Option<Duration>,
     shutdown: Shutdown,
 }
 
 impl NetScout {
     pub fn new(
         match_content: Vec<u8>,
-        timeout: Duration,
+        timeout: Option<Duration>,
         shutdown: Shutdown,
     ) -> Self {
         Self {
@@ -41,12 +41,7 @@ impl NetScout {
         &mut self,
         port: u16,
     ) -> Result<()> {
-        let shutdown = self.shutdown.clone();
-        let timeout = self.timeout;
-        tokio::spawn(async move {
-            tokio::time::sleep(timeout).await;
-            shutdown.shutdown();
-        });
+        self.start_timeout();
 
         self.match_content.put_u16(port);
         let targets = broadcast_targets()?;
@@ -85,12 +80,7 @@ impl NetScout {
         let socket = UdpSocket::bind(format!("{}:{}", "0.0.0.0", BROADCAST_PORT)).await?;
         socket.set_broadcast(true)?;
 
-        let shutdown = self.shutdown.clone();
-        let timeout = self.timeout;
-        tokio::spawn(async move {
-            tokio::time::sleep(timeout).await;
-            shutdown.shutdown();
-        });
+        self.start_timeout();
 
         let match_content: &[u8] = &self.match_content;
         let match_content_len = match_content.len();
@@ -127,6 +117,16 @@ impl NetScout {
 
     pub async fn terminated(&self) {
         self.shutdown.wait().await
+    }
+
+    fn start_timeout(&self) {
+        if let Some(timeout) = self.timeout {
+            let shutdown = self.shutdown.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(timeout).await;
+                shutdown.shutdown();
+            });
+        }
     }
 }
 

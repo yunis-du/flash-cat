@@ -40,9 +40,6 @@ use crate::{
     send_msg_to_relay,
 };
 
-/// Broadcast local relay addr timeout.
-pub const BROADCAST_TIMEOUT: Duration = Duration::from_secs(60);
-
 /// How long the sender waits for receiver-side file confirmation.
 pub const FILE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -269,7 +266,7 @@ impl FlashCatSender {
         let scout_shutdown = Shutdown::new();
         let match_content = self.encryptor.encrypt_share_code_bytes().to_vec();
         tokio::spawn(async move {
-            let mut net_scout = NetScout::new(match_content, BROADCAST_TIMEOUT, scout_shutdown);
+            let mut net_scout = NetScout::new(match_content, None, scout_shutdown);
             let broadcast_result = tokio::select! {
                 result = net_scout.broadcast(local_relay_port) => Some(result),
                 _ = local_cancel.cancelled() => None,

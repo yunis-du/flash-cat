@@ -68,17 +68,15 @@ impl Progress {
     }
 
     fn ensure_total_bar(&mut self) {
-        if self.total_bar.is_some() || self.total_size == 0 || self.num_files <= 1 {
+        if self.total_bar.is_some() || self.num_files <= 1 {
             return;
         }
         let prefix = format!("{:<width$}", "Total", width = self.max_file_name_len);
-        let total_pb = ProgressBar::new(self.total_size).with_prefix(prefix).with_message(format!("0/{}", self.num_files));
+        let total_pb = ProgressBar::new(self.num_files).with_prefix(prefix).with_message(format!("{}/{}", HumanBytes(0), HumanBytes(self.total_size)));
         total_pb.set_style(
-            ProgressStyle::with_template(
-                "  ------------------------\n  {prefix:.bold.green} [{bar:50.cyan/blue}] {bytes}/{total_bytes} • {bytes_per_sec} • {msg}",
-            )
-            .unwrap()
-            .progress_chars("#>-"),
+            ProgressStyle::with_template("  ------------------------\n  {prefix:.bold.green} [{bar:50.cyan/blue}] {msg} • {pos}/{len}")
+                .unwrap()
+                .progress_chars("#>-"),
         );
         let total_pb = self.multi.add(total_pb);
         self.total_bar = Some(total_pb);
@@ -113,15 +111,23 @@ impl Progress {
         }
     }
 
-    fn update_total(
+    fn update_total_bytes(
         &mut self,
         file_id: u64,
         new_pos: u64,
     ) {
-        let old_pos = self.file_positions.insert(file_id, new_pos).unwrap_or(0);
+        self.file_positions.insert(file_id, new_pos);
         if let Some(total_bar) = &self.total_bar {
-            let current = total_bar.position();
-            total_bar.set_position(current + new_pos.saturating_sub(old_pos));
+            let transferred = self.file_positions.values().copied().sum::<u64>();
+            total_bar.set_message(format!("{}/{}", HumanBytes(transferred), HumanBytes(self.total_size)));
+        }
+    }
+
+    fn advance_total(&mut self) {
+        self.ensure_total_bar();
+        self.finished_count += 1;
+        if let Some(total_bar) = &self.total_bar {
+            total_bar.set_position(self.finished_count);
         }
     }
 
@@ -157,7 +163,7 @@ impl Progress {
             }
             progress_bar.set_position(pos);
         }
-        self.update_total(file_id, pos);
+        self.update_total_bytes(file_id, pos);
     }
 
     pub fn finish(
@@ -176,12 +182,9 @@ impl Progress {
             progress_bar.finish_and_clear();
             let _ = self.multi.println(summary);
         }
-        let file_size = self.file_info.get(&file_id).map(|(_, s)| *s).unwrap_or(0);
-        self.update_total(file_id, file_size);
-        self.finished_count += 1;
-        if let Some(total_bar) = &self.total_bar {
-            total_bar.set_message(format!("{}/{}", self.finished_count, self.num_files));
-        }
+        let file_size = self.file_info.get(&file_id).map(|(_, size)| *size).unwrap_or(0);
+        self.update_total_bytes(file_id, file_size);
+        self.advance_total();
         self.finish_total_if_done();
     }
 
@@ -195,12 +198,9 @@ impl Progress {
         if let Some(progress_bar) = self.progress_bar_map.remove(&file_id) {
             progress_bar.finish_and_clear();
         }
-        let file_size = self.file_info.get(&file_id).map(|(_, s)| *s).unwrap_or(0);
-        self.update_total(file_id, file_size);
-        self.finished_count += 1;
-        if let Some(total_bar) = &self.total_bar {
-            total_bar.set_message(format!("{}/{}", self.finished_count, self.num_files));
-        }
+        let file_size = self.file_info.get(&file_id).map(|(_, size)| *size).unwrap_or(0);
+        self.update_total_bytes(file_id, file_size);
+        self.advance_total();
         self.finish_total_if_done();
     }
 
