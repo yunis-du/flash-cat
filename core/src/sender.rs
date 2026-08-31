@@ -1,4 +1,11 @@
-use std::{collections::HashMap, net::SocketAddr, path::Path, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    path::Path,
+    pin::Pin,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use anyhow::{Result, bail};
 use bytes::{Bytes, BytesMut};
@@ -9,6 +16,7 @@ use tokio::{
     sync::mpsc,
 };
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
+use tokio_util::sync::CancellationToken;
 use tonic::transport::Endpoint;
 
 use flash_cat_common::{
@@ -39,16 +47,71 @@ pub const FILE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(300);
 pub type SenderStream = Pin<Box<dyn Stream<Item = SenderInteractionMessage> + Send>>;
 
 #[derive(Debug, Clone)]
+struct SenderLifecycle {
+    root: CancellationToken,
+    local: CancellationToken,
+    public: CancellationToken,
+    specified: CancellationToken,
+    selected_local: Arc<OnceLock<bool>>,
+}
+
+impl SenderLifecycle {
+    fn new() -> Self {
+        let root = CancellationToken::new();
+        Self {
+            local: root.child_token(),
+            public: root.child_token(),
+            specified: root.child_token(),
+            selected_local: Arc::new(OnceLock::new()),
+            root,
+        }
+    }
+
+    fn relay_token(
+        &self,
+        relay_type: &RelayType,
+    ) -> CancellationToken {
+        match relay_type {
+            RelayType::Local => self.local.clone(),
+            RelayType::Public => self.public.clone(),
+            RelayType::Specify => self.specified.clone(),
+        }
+    }
+
+    fn select_path(
+        &self,
+        local: bool,
+    ) -> bool {
+        *self.selected_local.get_or_init(|| {
+            if local {
+                self.public.cancel();
+            } else {
+                self.local.cancel();
+            }
+            local
+        }) == local
+    }
+
+    fn cancel(&self) {
+        self.root.cancel();
+    }
+}
+
+impl Default for SenderLifecycle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct FlashCatSender {
     zip_files: Vec<String>,
     encryptor: Arc<Encryptor>,
     specify_relay: Option<String>,
     file_collector: Arc<FileCollector>,
-    local_relay_shutdown: Shutdown,
-    public_relay_shutdown: Shutdown,
+    lifecycle: SenderLifecycle,
     client_type: ClientType,
     lan_broadcast: bool,
-    shutdown: Shutdown,
 }
 
 impl FlashCatSender {
@@ -61,10 +124,10 @@ impl FlashCatSender {
         lan_broadcast: bool,
     ) -> Result<Self> {
         paths_exist(files.as_slice())?;
-        let shutdown = Shutdown::new();
+        let lifecycle = SenderLifecycle::new();
         let mut zip_files = vec![];
         if zip_floder {
-            let (treated_files, zip) = Self::zip_folder(files, shutdown.clone()).await?;
+            let (treated_files, zip) = Self::zip_folder(files, lifecycle.root.clone()).await?;
             files = treated_files;
             zip_files = zip;
         }
@@ -75,11 +138,9 @@ impl FlashCatSender {
             encryptor,
             specify_relay,
             file_collector: Arc::new(file_collector),
-            local_relay_shutdown: Shutdown::new(),
-            public_relay_shutdown: Shutdown::new(),
+            lifecycle,
             client_type,
             lan_broadcast,
-            shutdown,
         })
     }
 
@@ -90,18 +151,15 @@ impl FlashCatSender {
         client_type: ClientType,
         lan_broadcast: bool,
     ) -> Result<Self> {
-        let shutdown = Shutdown::new();
         let encryptor = Arc::new(Encryptor::new(share_code)?);
         Ok(Self {
             zip_files: vec![],
             encryptor,
             specify_relay,
             file_collector: Arc::new(file_collector),
-            local_relay_shutdown: Shutdown::new(),
-            public_relay_shutdown: Shutdown::new(),
+            lifecycle: SenderLifecycle::new(),
             client_type,
             lan_broadcast,
-            shutdown,
         })
     }
 
@@ -112,21 +170,14 @@ impl FlashCatSender {
             let specify_relay = self.specify_relay.clone().unwrap();
             let specify_relay_addr = normalize_relay_endpoint(specify_relay);
             let endpoint = get_endpoint(specify_relay_addr)?;
-            self.connect_relay(
-                RelayType::Specify,
-                endpoint,
-                sender_stream_tx.clone(),
-                self.shutdown.clone(),
-                self.local_relay_shutdown.clone(),
-            )
-            .await?;
+            self.connect_relay(RelayType::Specify, endpoint, sender_stream_tx.clone()).await?;
         } else {
             // start local relay
             let local_relay_port = find_available_port(DEFAULT_RELAY_PORT);
             self.start_local_relay(
                 format!("0.0.0.0:{}", local_relay_port).parse().unwrap(),
                 sender_stream_tx.clone(),
-                self.local_relay_shutdown.clone(),
+                self.lifecycle.local.clone(),
             )
             .await;
 
@@ -135,39 +186,27 @@ impl FlashCatSender {
 
             // connect local relay
             let endpoint = get_endpoint(format!("http://127.0.0.1:{local_relay_port}"))?;
-            self.connect_relay(
-                RelayType::Local,
-                endpoint,
-                sender_stream_tx.clone(),
-                self.public_relay_shutdown.clone(),
-                self.local_relay_shutdown.clone(),
-            )
-            .await?;
+            self.connect_relay(RelayType::Local, endpoint, sender_stream_tx.clone()).await?;
 
             // connect public relay
             let endpoint = get_endpoint(format!("https://{PUBLIC_RELAY}"))?;
-            self.connect_relay(
-                RelayType::Public,
-                endpoint,
-                sender_stream_tx.clone(),
-                self.public_relay_shutdown.clone(),
-                self.local_relay_shutdown.clone(),
-            )
-            .await?;
+            self.connect_relay(RelayType::Public, endpoint, sender_stream_tx.clone()).await?;
 
             if self.lan_broadcast {
-                self.broadcast_relay_addr(local_relay_port, sender_stream_tx.clone()).await;
+                self.broadcast_relay_addr(local_relay_port, sender_stream_tx.clone(), self.lifecycle.local.clone()).await;
             }
         }
-        // resolve shutdown when sender_stream_rx is no message will cause panic
-        let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+        let root_cancel = self.lifecycle.root.clone();
         Ok(Box::pin(async_stream::stream! {
-            while !self.shutdown.is_terminated() {
+            loop {
                 tokio::select! {
-                    Some(sender_stream) = sender_stream_rx.recv() => {
-                        yield sender_stream;
+                    message = sender_stream_rx.recv() => {
+                        match message {
+                            Some(message) => yield message,
+                            None => break,
+                        }
                     }
-                    _ = interval.tick() =>(),
+                    _ = root_cancel.cancelled() => break,
                 }
             }
         }))
@@ -177,7 +216,7 @@ impl FlashCatSender {
         &self,
         local_relay_addr: SocketAddr,
         sender_stream_tx: mpsc::Sender<SenderInteractionMessage>,
-        local_relay_shutdown: Shutdown,
+        local_cancel: CancellationToken,
     ) {
         tokio::spawn(async move {
             let relay = match Relay::new(None, true) {
@@ -196,10 +235,7 @@ impl FlashCatSender {
             let relay_task = async { relay.bind(local_relay_addr).await };
 
             let signals_task = async {
-                tokio::select! {
-                    () = local_relay_shutdown.wait() => (),
-                    else => return,
-                }
+                local_cancel.cancelled().await;
                 // Waiting done message send to the right end.
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 relay.shutdown();
@@ -213,12 +249,17 @@ impl FlashCatSender {
         &self,
         local_relay_port: u16,
         sender_stream_tx: mpsc::Sender<SenderInteractionMessage>,
+        local_cancel: CancellationToken,
     ) {
-        let shutdown = Shutdown::new();
+        let scout_shutdown = Shutdown::new();
         let match_content = self.encryptor.encrypt_share_code_bytes().to_vec();
         tokio::spawn(async move {
-            let mut net_scout = NetScout::new(match_content, BROADCAST_TIMEOUT, shutdown.clone());
-            if let Err(e) = net_scout.broadcast(local_relay_port).await {
+            let mut net_scout = NetScout::new(match_content, BROADCAST_TIMEOUT, scout_shutdown);
+            let broadcast_result = tokio::select! {
+                result = net_scout.broadcast(local_relay_port) => Some(result),
+                _ = local_cancel.cancelled() => None,
+            };
+            if let Some(Err(e)) = broadcast_result {
                 // LAN discovery is an optional optimization. TUN-based VPNs commonly
                 // reject broadcast traffic, but the public relay remains usable.
                 let _ = &sender_stream_tx
@@ -235,25 +276,28 @@ impl FlashCatSender {
         relay_type: RelayType,
         mut endpoint: Endpoint,
         sender_stream_tx: mpsc::Sender<SenderInteractionMessage>,
-        public_or_specify_shutdown: Shutdown,
-        local_relay_shutdown: Shutdown,
     ) -> Result<()> {
-        let mut client = RelayServiceClient::connect(endpoint.clone()).await?;
+        let cancel = self.lifecycle.relay_token(&relay_type);
+        let mut client = tokio::select! {
+            _ = cancel.cancelled() => return Ok(()),
+            result = RelayServiceClient::connect(endpoint.clone()) => result?,
+        };
 
-        let resp = match client
-            .join(JoinRequest {
-                id: Some(Id {
-                    encrypted_share_code: self.encryptor.encrypt_share_code_bytes(),
-                    character: Character::Sender.into(),
-                }),
-                client_type: self.client_type.into(),
-                // The source address for LAN discovery must come from the
-                // interface that received the broadcast. A single route-derived
-                // address is ambiguous on multi-homed and TUN-enabled hosts.
-                sender_local_relay: None,
-            })
-            .await
-        {
+        let join = client.join(JoinRequest {
+            id: Some(Id {
+                encrypted_share_code: self.encryptor.encrypt_share_code_bytes(),
+                character: Character::Sender.into(),
+            }),
+            client_type: self.client_type.into(),
+            // The source address for LAN discovery must come from the
+            // interface that received the broadcast. A single route-derived
+            // address is ambiguous on multi-homed and TUN-enabled hosts.
+            sender_local_relay: None,
+        });
+        let resp = match tokio::select! {
+            _ = cancel.cancelled() => return Ok(()),
+            result = join => result,
+        } {
             Ok(resp) => resp,
             Err(status) => {
                 let _ = Self::send_msg_to_stream(
@@ -309,6 +353,7 @@ impl FlashCatSender {
 
         let encryptor = self.encryptor.clone();
         let file_collector = self.file_collector.clone();
+        let lifecycle = self.lifecycle.clone();
         tokio::spawn(async move {
             if let Err(e) = Self::relay_channel(
                 relay_type.clone(),
@@ -316,8 +361,7 @@ impl FlashCatSender {
                 file_collector.clone(),
                 endpoint,
                 &sender_stream_tx,
-                public_or_specify_shutdown,
-                local_relay_shutdown,
+                lifecycle,
             )
             .await
             {
@@ -369,28 +413,26 @@ impl FlashCatSender {
         file_collector: Arc<FileCollector>,
         endpoint: Endpoint,
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
-        public_or_specify_shutdown: Shutdown,
-        local_relay_shutdown: Shutdown,
+        lifecycle: SenderLifecycle,
     ) -> Result<()> {
-        let (mut client, mut tx, mut messages, mut confirm_tx, mut confirm_rx) = Self::establish_channel(&encryptor, &endpoint).await?;
-
-        let shutdown = match relay_type {
-            RelayType::Local => local_relay_shutdown.clone(),
-            _ => public_or_specify_shutdown.clone(),
+        let cancel = lifecycle.relay_token(&relay_type);
+        let (mut client, mut tx, mut messages, mut confirm_tx, mut confirm_rx) = tokio::select! {
+            _ = cancel.cancelled() => return Ok(()),
+            result = Self::establish_channel(&encryptor, &endpoint) => result?,
         };
 
         let mut ping_interval = tokio::time::interval(PING_INTERVAL);
         let mut reconnect_attempt = 0u32;
         let mut is_first_connect = true;
-        let mut send_files_shutdown = Shutdown::new();
+        let mut send_files_cancel = cancel.child_token();
         loop {
             let message = tokio::select! {
-                _ = shutdown.wait() => {
-                    send_files_shutdown.shutdown();
-                    let _ = client.close(CloseRequest {
+                _ = cancel.cancelled() => {
+                    send_files_cancel.cancel();
+                    let close = client.close(CloseRequest {
                         encrypted_share_code: encryptor.encrypt_share_code_bytes(),
-                    })
-                    .await;
+                    });
+                    let _ = tokio::time::timeout(Duration::from_secs(1), close).await;
                     return Ok(());
                 }
                 _ = ping_interval.tick() => {
@@ -409,10 +451,10 @@ impl FlashCatSender {
                             }
                         }
                         Some(Err(_)) | None => {
-                            if shutdown.is_terminated() {
+                            if cancel.is_cancelled() {
                                 return Ok(());
                             }
-                            send_files_shutdown.shutdown();
+                            send_files_cancel.cancel();
 
                             let result = loop {
                                 if !crate::should_retry(reconnect_attempt) {
@@ -429,14 +471,21 @@ impl FlashCatSender {
                                     )),
                                 )
                                 .await;
-                                tokio::time::sleep(delay).await;
+                                tokio::select! {
+                                    _ = cancel.cancelled() => return Ok(()),
+                                    _ = tokio::time::sleep(delay) => (),
+                                }
                                 reconnect_attempt += 1;
 
-                                if shutdown.is_terminated() {
+                                if cancel.is_cancelled() {
                                     return Ok(());
                                 }
 
-                                match Self::establish_channel(&encryptor, &endpoint).await {
+                                let reconnect = tokio::select! {
+                                    _ = cancel.cancelled() => return Ok(()),
+                                    result = Self::establish_channel(&encryptor, &endpoint) => result,
+                                };
+                                match reconnect {
                                     Ok(result) => break result,
                                     Err(e) => {
                                         let _ = Self::send_msg_to_stream(
@@ -456,7 +505,7 @@ impl FlashCatSender {
                             messages = new_messages;
                             confirm_tx = new_confirm_tx;
                             confirm_rx = new_confirm_rx;
-                            send_files_shutdown = Shutdown::new();
+                            send_files_cancel = cancel.child_token();
                             is_first_connect = false;
                             reconnect_attempt = 0;
                             ping_interval = tokio::time::interval(PING_INTERVAL);
@@ -492,10 +541,8 @@ impl FlashCatSender {
                     }
                 }
                 RelayMessage::Ready(ready) => {
-                    if ready.local_relay {
-                        public_or_specify_shutdown.shutdown();
-                    } else {
-                        local_relay_shutdown.shutdown();
+                    if relay_type != RelayType::Specify && !lifecycle.select_path(ready.local_relay) {
+                        return Ok(());
                     }
                     send_msg_to_relay(
                         &tx,
@@ -529,7 +576,7 @@ impl FlashCatSender {
                                             let tx = tx.clone();
                                             let sender_stream_tx = sender_stream_tx.clone();
                                             let notify_rx = confirm_rx.clone();
-                                            let cancel = send_files_shutdown.clone();
+                                            let cancel = send_files_cancel.clone();
                                             tokio::spawn(async move {
                                                 if let Err(err) =
                                                     Self::send_files(encryptor, tx, file_collector, notify_rx, &sender_stream_tx, cancel, None).await
@@ -568,7 +615,7 @@ impl FlashCatSender {
                                 let tx = tx.clone();
                                 let sender_stream_tx = sender_stream_tx.clone();
                                 let notify_rx = confirm_rx.clone();
-                                let cancel = send_files_shutdown.clone();
+                                let cancel = send_files_cancel.clone();
                                 tokio::spawn(async move {
                                     if let Err(err) = Self::send_files(
                                         encryptor,
@@ -617,12 +664,12 @@ impl FlashCatSender {
         file_collector: Arc<FileCollector>,
         notify: async_channel::Receiver<FileConfirm>,
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
-        cancel: Shutdown,
+        cancel: CancellationToken,
         resume_progress: Option<HashMap<u64, (u64, bool)>>,
     ) -> Result<()> {
         for send_file in file_collector.files.iter() {
-            if cancel.is_terminated() {
-                break;
+            if cancel.is_cancelled() {
+                return Ok(());
             }
 
             if let Some(ref progress) = resume_progress {
@@ -649,7 +696,7 @@ impl FlashCatSender {
         tx: &mpsc::Sender<RelayUpdate>,
         notify: &async_channel::Receiver<FileConfirm>,
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
-        cancel: &Shutdown,
+        cancel: &CancellationToken,
         file_resume: Option<(u64, bool)>,
     ) -> Result<()> {
         // Resume: partial file — send BreakPoint and stream remaining data
@@ -696,16 +743,20 @@ impl FlashCatSender {
         )
         .await?;
 
-        let file_confirm = tokio::time::timeout(FILE_CONFIRM_TIMEOUT, notify.recv())
-            .await
-            .map_err(|_| {
-                anyhow::anyhow!(
-                    "timed out waiting for receiver confirmation for file {} after {}s",
-                    send_file.file_id,
-                    FILE_CONFIRM_TIMEOUT.as_secs()
-                )
-            })?
-            .map_err(|_| anyhow::anyhow!("confirm channel closed for file {}", send_file.file_id))?;
+        let file_confirm = tokio::select! {
+            _ = cancel.cancelled() => return Ok(()),
+            result = tokio::time::timeout(FILE_CONFIRM_TIMEOUT, notify.recv()) => {
+                result
+                    .map_err(|_| {
+                        anyhow::anyhow!(
+                            "timed out waiting for receiver confirmation for file {} after {}s",
+                            send_file.file_id,
+                            FILE_CONFIRM_TIMEOUT.as_secs()
+                        )
+                    })?
+                    .map_err(|_| anyhow::anyhow!("confirm channel closed for file {}", send_file.file_id))?
+            }
+        };
 
         let mut position = 0;
 
@@ -767,7 +818,7 @@ impl FlashCatSender {
         encryptor: &Encryptor,
         tx: &mpsc::Sender<RelayUpdate>,
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
-        cancel: &Shutdown,
+        cancel: &CancellationToken,
         start_position: u64,
     ) -> Result<()> {
         let mut read_file = File::open(send_file.access_path.as_str()).await?;
@@ -775,11 +826,14 @@ impl FlashCatSender {
         let mut position = start_position;
         let mut buffer = BytesMut::with_capacity(SEND_BUFF_SIZE);
         loop {
-            if cancel.is_terminated() {
+            if cancel.is_cancelled() {
                 return Ok(());
             }
             buffer.clear();
-            let read_length = read_file.read_buf(&mut buffer).await?;
+            let read_length = tokio::select! {
+                _ = cancel.cancelled() => return Ok(()),
+                result = read_file.read_buf(&mut buffer) => result?,
+            };
             if read_length == 0 {
                 send_msg_to_relay(
                     tx,
@@ -824,14 +878,12 @@ impl FlashCatSender {
     }
 
     pub fn shutdown(&self) {
+        self.lifecycle.cancel();
         let _ = self.clean_zip_files();
-        self.local_relay_shutdown.shutdown();
-        self.public_relay_shutdown.shutdown();
-        self.shutdown.shutdown();
     }
 
     pub async fn terminated(&self) {
-        self.shutdown.wait().await
+        self.lifecycle.root.cancelled().await
     }
 
     fn clean_zip_files(&self) -> Result<()> {
@@ -840,7 +892,7 @@ impl FlashCatSender {
 
     async fn zip_folder(
         mut files: Vec<String>,
-        shutdown: Shutdown,
+        cancel: CancellationToken,
     ) -> Result<(Vec<String>, Vec<String>)> {
         let mut async_task = vec![];
         let mut zip_files = vec![];
@@ -850,25 +902,38 @@ impl FlashCatSender {
                 let file_name = format!("{}.zip", Path::new(p).file_name().unwrap_or_default().to_string_lossy());
                 let path = p.to_owned();
                 let file_name_for_task = file_name.clone();
-                let shutdown_clone = shutdown.clone();
-                async_task.push(tokio::spawn(
-                    async move { zip_folder(file_name_for_task, path, shutdown_clone) },
-                ));
+                let cancel_clone = cancel.clone();
+                async_task.push(tokio::spawn(async move {
+                    let shutdown = Shutdown::new();
+                    let shutdown_on_cancel = shutdown.clone();
+                    let cancel_task = tokio::spawn(async move {
+                        cancel_clone.cancelled().await;
+                        shutdown_on_cancel.shutdown();
+                    });
+                    let result = tokio::task::spawn_blocking(move || zip_folder(file_name_for_task, path, shutdown)).await?;
+                    cancel_task.abort();
+                    result
+                }));
                 zip_files.push(file_name.clone());
                 files[i] = file_name;
             }
         }
 
         let sigint = ctrl_c();
+        let signal_cancel = cancel.clone();
         tokio::spawn(async move {
             tokio::select! {
                 _ = sigint => (),
             }
-            shutdown.shutdown();
+            signal_cancel.cancel();
         });
 
         for task in async_task {
             task.await??;
+        }
+        if cancel.is_cancelled() {
+            let _ = remove_files(zip_files.as_slice());
+            bail!("folder compression cancelled");
         }
         Ok((files, zip_files))
     }

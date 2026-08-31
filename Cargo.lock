@@ -2137,6 +2137,7 @@ dependencies = [
  "rand 0.10.0",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tonic",
 ]
 
@@ -6910,6 +6911,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

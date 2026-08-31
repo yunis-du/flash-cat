@@ -19,6 +19,7 @@ chrono.workspace = true
 prost.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
+tokio-util.workspace = true
 tonic.workspace = true
 rand.workspace = true
 log.workspace = true
