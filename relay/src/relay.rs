@@ -18,6 +18,7 @@ const DISCONNECTED_SESSION_EXPIRY: Duration = Duration::from_secs(300);
 /// Relay state.
 pub struct RelayState {
     external_ip: Option<IpAddr>,
+    forward: Option<SocketAddr>,
     store: DashMap<String, Arc<Session>>,
     local_relay: bool,
 }
@@ -28,9 +29,19 @@ impl RelayState {
         external_ip: Option<IpAddr>,
         local_relay: bool,
     ) -> Result<Self> {
+        Self::new_with_forward(external_ip, local_relay, None)
+    }
+
+    /// Create a relay state that optionally forwards session setup to another relay.
+    pub fn new_with_forward(
+        external_ip: Option<IpAddr>,
+        local_relay: bool,
+        forward: Option<SocketAddr>,
+    ) -> Result<Self> {
         Ok(Self {
             store: DashMap::new(),
             external_ip,
+            forward,
             local_relay,
         })
     }
@@ -38,6 +49,11 @@ impl RelayState {
     /// External IP address.
     pub fn external_ip(&self) -> Option<IpAddr> {
         self.external_ip
+    }
+
+    /// Relay that owns the session and carries the data stream.
+    pub fn forward(&self) -> Option<SocketAddr> {
+        self.forward
     }
 
     /// Lookup session by name.
@@ -129,8 +145,17 @@ impl Relay {
         external_ip: Option<IpAddr>,
         local_relay: bool,
     ) -> Result<Self> {
+        Self::new_with_forward(external_ip, local_relay, None)
+    }
+
+    /// Create a relay that optionally forwards session setup to another relay.
+    pub fn new_with_forward(
+        external_ip: Option<IpAddr>,
+        local_relay: bool,
+        forward: Option<SocketAddr>,
+    ) -> Result<Self> {
         Ok(Self {
-            state: Arc::new(RelayState::new(external_ip, local_relay)?),
+            state: Arc::new(RelayState::new_with_forward(external_ip, local_relay, forward)?),
             shutdown: Shutdown::new(),
         })
     }

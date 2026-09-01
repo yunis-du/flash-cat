@@ -87,6 +87,24 @@ You can deploy your own relay server to handle file transfers within your local 
 flash-cat relay
 ```
 
+### Forward to a separate transfer relay
+
+An entry relay can forward session setup to another relay and direct clients to
+connect to that relay for the data transfer. The transfer relay must be directly
+reachable by both clients.
+
+```bash
+# Transfer relay (server B)
+flash-cat relay --ip 0.0.0.0 --port 6880
+
+# Entry relay (server A, behind the configured domain)
+flash-cat relay --forward 203.0.113.10:6880
+```
+
+`--forward` cannot be combined with `--external-ip`. Unlike `--external-ip`,
+it creates and looks up sessions on the target relay, so the entry and transfer
+relay do not need to share in-memory state.
+
 ## Specify relay
 
 ### command-line parameters

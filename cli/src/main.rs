@@ -94,6 +94,10 @@ struct RelayCmd {
     #[clap(long, value_parser)]
     external_ip: Option<IpAddr>,
 
+    /// Forward session setup to this relay; clients transfer data directly through it.
+    #[clap(long, value_parser, conflicts_with = "external_ip")]
+    forward: Option<SocketAddr>,
+
     /// Log file path of the relay server.
     #[clap(long, default_value = "flash-cat-relay.log", env = "FLASH_CAT_RELAY_LOG_PATH")]
     log_file: String,
@@ -215,6 +219,7 @@ async fn recv(recv_cmd: RecvCmd) -> Result<()> {
 async fn start_relay(
     addr: SocketAddr,
     external_ip: Option<IpAddr>,
+    forward: Option<SocketAddr>,
 ) -> Result<()> {
     #[cfg(unix)]
     let mut sigterm = signal(SignalKind::terminate())?;
@@ -223,7 +228,10 @@ async fn start_relay(
     #[cfg(windows)]
     let sigint = ctrl_c();
 
-    let relay = Relay::new(external_ip, false)?;
+    if forward == Some(addr) {
+        bail!("forward relay must not be the relay's own listening address");
+    }
+    let relay = Relay::new_with_forward(external_ip, false, forward)?;
 
     let relay_task = async {
         info!("relay listening at {addr}");
@@ -288,7 +296,7 @@ fn main() -> ExitCode {
             SubCmd::Relay(relay_cmd) => {
                 init_logger(relay_cmd.log_level, relay_cmd.log_file);
                 let addr = SocketAddr::new(relay_cmd.ip, relay_cmd.port);
-                return match start_relay(addr, relay_cmd.external_ip) {
+                return match start_relay(addr, relay_cmd.external_ip, relay_cmd.forward) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {
                         println!("{err:?}");
@@ -310,4 +318,24 @@ fn main() -> ExitCode {
         Cmd::command().print_help().unwrap();
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_forward_relay() {
+        let command = Cmd::try_parse_from(["flash-cat", "relay", "--forward", "203.0.113.10:6880"]).unwrap();
+        let Some(SubCmd::Relay(relay)) = command.sub_cmd else {
+            panic!("relay command was not parsed");
+        };
+        assert_eq!(relay.forward, Some("203.0.113.10:6880".parse().unwrap()));
+    }
+
+    #[test]
+    fn forward_relay_conflicts_with_external_ip() {
+        let result = Cmd::try_parse_from(["flash-cat", "relay", "--external-ip", "198.51.100.20", "--forward", "203.0.113.10:6880"]);
+        assert!(result.is_err());
+    }
 }

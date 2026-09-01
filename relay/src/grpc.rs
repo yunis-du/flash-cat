@@ -3,13 +3,13 @@ use std::{sync::Arc, time::Duration};
 use log::{debug, error, info};
 use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
-use tonic::{Request, Response, Status, Streaming};
+use tonic::{Request, Response, Status, Streaming, transport::Endpoint};
 
 use flash_cat_common::{
-    consts::RELAY_CHANNEL_CAPACITY,
+    consts::{DEFAULT_CONNECT_TIMEOUT, RELAY_CHANNEL_CAPACITY},
     proto::{
         Character, CloseRequest, CloseResponse, JoinFailed, JoinRequest, JoinResponse, JoinSuccess, Joined, Ready, RelayInfo, RelayUpdate, Terminated,
-        join_response::JoinResponseMessage, relay_service_server::RelayService, relay_update::RelayMessage,
+        join_response::JoinResponseMessage, relay_service_client::RelayServiceClient, relay_service_server::RelayService, relay_update::RelayMessage,
     },
 };
 
@@ -30,6 +30,16 @@ impl GrpcServer {
 
 type RR<T> = Result<Response<T>, Status>;
 
+async fn forwarded_client(forward: std::net::SocketAddr) -> Result<RelayServiceClient<tonic::transport::Channel>, Status> {
+    Endpoint::from_shared(format!("http://{forward}"))
+        .map_err(|error| Status::internal(format!("invalid forward relay address: {error}")))?
+        .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+        .connect()
+        .await
+        .map(RelayServiceClient::new)
+        .map_err(|error| Status::unavailable(format!("failed to connect to forward relay {forward}: {error}")))
+}
+
 #[tonic::async_trait]
 impl RelayService for GrpcServer {
     type ChannelStream = ReceiverStream<Result<RelayUpdate, Status>>;
@@ -38,6 +48,17 @@ impl RelayService for GrpcServer {
         &self,
         request: Request<JoinRequest>,
     ) -> RR<JoinResponse> {
+        if let Some(forward) = self.0.forward() {
+            let mut response = forwarded_client(forward).await?.join(request.into_inner()).await?.into_inner();
+            if let Some(JoinResponseMessage::Success(success)) = response.join_response_message.as_mut() {
+                success.relay = Some(RelayInfo {
+                    relay_ip: forward.ip().to_string(),
+                    relay_port: forward.port() as u32,
+                });
+            }
+            return Ok(Response::new(response));
+        }
+
         let relay_local_addr = request.local_addr();
         let relay_port = match relay_local_addr {
             Some(local_addr) => local_addr.port() as u32,
@@ -189,6 +210,10 @@ impl RelayService for GrpcServer {
         &self,
         request: Request<CloseRequest>,
     ) -> RR<CloseResponse> {
+        if let Some(forward) = self.0.forward() {
+            return forwarded_client(forward).await?.close(request.into_inner()).await;
+        }
+
         let request = request.into_inner();
         let session_code = String::from_utf8_lossy(request.encrypted_share_code.as_ref()).to_string();
         // Closing must not wait on either participant's bounded update queue. A
@@ -328,4 +353,70 @@ async fn send_err(
     err: String,
 ) -> bool {
     send_msg(tx, RelayMessage::Error(err)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{net::TcpListener, sync::Arc, time::Duration};
+
+    use bytes::Bytes;
+    use flash_cat_common::proto::{ClientType, Id};
+
+    use super::*;
+    use crate::relay::Relay;
+
+    fn unused_local_addr() -> std::net::SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap()
+    }
+
+    #[tokio::test]
+    async fn forwarded_join_and_close_use_target_session_store() {
+        let target_addr = unused_local_addr();
+        let target = Arc::new(Relay::new(None, false).unwrap());
+        let running_target = Arc::clone(&target);
+        let target_task = tokio::spawn(async move { running_target.bind(target_addr).await });
+
+        let target_endpoint = format!("http://{target_addr}");
+        for _ in 0..50 {
+            if RelayServiceClient::connect(target_endpoint.clone()).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let entry = GrpcServer::new(Arc::new(RelayState::new_with_forward(None, false, Some(target_addr)).unwrap()));
+        let session_code = Bytes::from_static(b"forwarded-session");
+        let response = entry
+            .join(Request::new(JoinRequest {
+                id: Some(Id {
+                    encrypted_share_code: session_code.clone(),
+                    character: Character::Sender.into(),
+                }),
+                client_type: ClientType::Cli.into(),
+                sender_local_relay: None,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let Some(JoinResponseMessage::Success(success)) = response.join_response_message else {
+            panic!("forwarded join did not succeed");
+        };
+        let advertised_relay = success.relay.unwrap();
+        assert_eq!(advertised_relay.relay_ip, target_addr.ip().to_string());
+        assert_eq!(advertised_relay.relay_port, target_addr.port() as u32);
+        assert!(target.state().lookup("forwarded-session").is_some());
+
+        entry
+            .close(Request::new(CloseRequest {
+                encrypted_share_code: session_code,
+            }))
+            .await
+            .unwrap();
+        assert!(target.state().lookup("forwarded-session").is_none());
+
+        target.shutdown();
+        target_task.await.unwrap().unwrap();
+    }
 }
