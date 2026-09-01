@@ -23,6 +23,7 @@ pub const PING_INTERVAL: Duration = Duration::from_secs(2);
 pub enum SenderInteractionMessage {
     Message(String),
     Error(String),
+    RelayConnected(RelayType),
     ReceiverReject,
     RelayFailed((RelayType, String)),
     ContinueFile(u64),

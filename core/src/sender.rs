@@ -565,6 +565,9 @@ impl FlashCatSender {
                     .await?;
                 }
                 RelayMessage::Joined(_) => {
+                    if is_first_connect {
+                        Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::RelayConnected(relay_type.clone())).await?;
+                    }
                     // After reconnection, send ResumeRequest instead of waiting for Ready
                     if !is_first_connect && share_accepted {
                         send_msg_to_relay(

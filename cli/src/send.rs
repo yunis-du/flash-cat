@@ -59,14 +59,6 @@ impl Send {
             }
         }
         println!("({})", file_collector.total_size_to_human_readable());
-        println!("Share code is: {}", self.share_code);
-        println!("On the other computer run:");
-        println!();
-        if let Some(relay) = &self.relay {
-            println!("flash-cat recv {} --relay {}", self.share_code, relay);
-        } else {
-            println!("flash-cat recv {}", self.share_code);
-        }
 
         let mut progress = Progress::new(
             file_collector.num_files,
@@ -80,10 +72,29 @@ impl Send {
 
         match Arc::new(self.sender.clone()).start().await {
             Ok(mut stream) => {
+                let mut share_code_printed = false;
                 while !self.shutdown.is_terminated() {
                     if let Some(sender_msg) = stream.next().await {
                         match sender_msg {
                             SenderInteractionMessage::Message(msg) => progress.println(&msg),
+                            SenderInteractionMessage::RelayConnected(relay_type) => {
+                                let expected_relay = if self.relay.is_some() {
+                                    RelayType::Specify
+                                } else {
+                                    RelayType::Public
+                                };
+                                if !share_code_printed && relay_type == expected_relay {
+                                    share_code_printed = true;
+                                    progress.println(&format!("Share code is: {}", self.share_code));
+                                    progress.println("On the other computer run:");
+                                    progress.println("");
+                                    if let Some(relay) = &self.relay {
+                                        progress.println(&format!("flash-cat recv {} --relay {}", self.share_code, relay));
+                                    } else {
+                                        progress.println(&format!("flash-cat recv {}", self.share_code));
+                                    }
+                                }
+                            }
                             SenderInteractionMessage::Error(e) => {
                                 progress.println(&format!("An error occurred: {}", e));
                                 self.shutdown();

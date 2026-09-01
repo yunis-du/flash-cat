@@ -334,6 +334,7 @@ impl Render for SendView {
                                             SenderInteractionMessage::Message(_msg) => {
                                                 // Handle message notification if needed
                                             }
+                                            SenderInteractionMessage::RelayConnected(_) => {}
                                             SenderInteractionMessage::Error(e) => {
                                                 // Handle error
                                                 view.notification = NotificationType::Error(e);
