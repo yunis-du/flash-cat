@@ -108,6 +108,14 @@ impl Progress {
                 self.multi.add(pb)
             };
             self.progress_bar_map.insert(file_id, pb);
+            self.update_total_file_count();
+        }
+    }
+
+    fn update_total_file_count(&self) {
+        if let Some(total_bar) = &self.total_bar {
+            let active_count = self.progress_bar_map.len() as u64;
+            total_bar.set_position((self.finished_count + active_count).min(self.num_files));
         }
     }
 
@@ -126,9 +134,7 @@ impl Progress {
     fn advance_total(&mut self) {
         self.ensure_total_bar();
         self.finished_count += 1;
-        if let Some(total_bar) = &self.total_bar {
-            total_bar.set_position(self.finished_count);
-        }
+        self.update_total_file_count();
     }
 
     fn finish_total_if_done(&mut self) {
@@ -220,5 +226,24 @@ impl Progress {
         msg: &str,
     ) {
         let _ = self.multi.println(msg);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Progress;
+
+    #[test]
+    fn total_count_includes_the_active_file() {
+        let mut progress = Progress::new(2, 8, 30);
+
+        progress.add_progress("first", 1, 10);
+        assert_eq!(progress.total_bar.as_ref().map(|bar| bar.position()), Some(1));
+
+        progress.finish(1);
+        assert_eq!(progress.total_bar.as_ref().map(|bar| bar.position()), Some(1));
+
+        progress.add_progress("second", 2, 20);
+        assert_eq!(progress.total_bar.as_ref().map(|bar| bar.position()), Some(2));
     }
 }
