@@ -216,7 +216,12 @@ pub fn zip_folder<P: AsRef<Path>>(
         bail!("{} already exist.", file_name);
     }
 
+    let path = fs::canonicalize(path)?;
     let file = File::create(&file_name)?;
+    // The output archive can be located inside the source directory, most
+    // notably for `flash-cat send --zip .`. Exclude it from both walks so the
+    // archive never tries to compress its own continuously growing contents.
+    let output_path = fs::canonicalize(&file_name)?;
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated).unix_permissions(0o755);
 
@@ -226,7 +231,10 @@ pub fn zip_folder<P: AsRef<Path>>(
     let (total_size, total_files) = {
         let mut total_size = 0u64;
         let mut total_files = 0u64;
-        for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(&path).into_iter().filter_map(|e| e.ok()) {
+            if entry.path() == output_path {
+                continue;
+            }
             if entry.path().is_file() {
                 total_size += entry.metadata().map(|m| m.len()).unwrap_or(0);
                 total_files += 1;
@@ -267,13 +275,16 @@ pub fn zip_folder<P: AsRef<Path>>(
     #[cfg(feature = "progress")]
     let mut processed_files = 0u64;
 
-    for entry in WalkDir::new(path).contents_first(true).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(&path).contents_first(true).into_iter().filter_map(|e| e.ok()) {
         if shutdown.is_terminated() {
             break;
         }
 
         let entry_path = entry.path();
-        let relative_path = entry_path.strip_prefix(path).unwrap_or(entry_path).to_string_lossy();
+        if entry_path == output_path {
+            continue;
+        }
+        let relative_path = entry_path.strip_prefix(&path).unwrap_or(entry_path).to_string_lossy();
         // The ZIP specification requires the use of a forward slash '/' as the path separator.
         // On Windows, a backslash needs to be replaced.
         let path_in_zip = format!("{}/{}", root_dir, relative_path.replace('\\', "/"));
@@ -297,13 +308,15 @@ pub fn zip_folder<P: AsRef<Path>>(
             }
 
             zip.start_file(&path_in_zip, options)?;
-            let mut file = File::open(entry_path)?;
+            let file = File::open(entry_path)?;
+            #[cfg(feature = "progress")]
+            let mut file = progress_bar.wrap_read(file);
+            #[cfg(not(feature = "progress"))]
+            let mut file = file;
             io::copy(&mut file, &mut zip)?;
 
             #[cfg(feature = "progress")]
             {
-                let file_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                progress_bar.inc(file_size);
                 spinner.inc(1);
             }
         }
@@ -480,7 +493,23 @@ pub fn missing_chunks(
 
 #[cfg(test)]
 mod tests {
-    use super::safe_join_relative_path;
+    use std::{
+        fs,
+        io::Read,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    use super::{Shutdown, safe_join_relative_path, zip_folder};
+
+    static TEST_DIR_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn test_dir(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "flash-cat-{name}-{}-{}",
+            std::process::id(),
+            TEST_DIR_ID.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
 
     #[test]
     fn safe_join_accepts_normal_relative_path() {
@@ -492,5 +521,28 @@ mod tests {
     fn safe_join_rejects_path_escape() {
         assert!(safe_join_relative_path("/tmp/out", "../secret.txt").is_err());
         assert!(safe_join_relative_path("/tmp/out", "/tmp/secret.txt").is_err());
+    }
+
+    #[test]
+    fn zip_folder_excludes_archive_inside_source_directory() {
+        let source = test_dir("zip-self-exclusion");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("input.txt"), b"hello").unwrap();
+        let archive_path = source.join("archive.zip");
+
+        zip_folder(archive_path.to_string_lossy().into_owned(), &source, Shutdown::new()).unwrap();
+
+        let archive_file = fs::File::open(&archive_path).unwrap();
+        let mut archive = zip::ZipArchive::new(archive_file).unwrap();
+        assert_eq!(archive.len(), 1);
+        let mut entry = archive.by_index(0).unwrap();
+        assert!(entry.name().ends_with("/input.txt"));
+        let mut contents = String::new();
+        entry.read_to_string(&mut contents).unwrap();
+        assert_eq!(contents, "hello");
+
+        drop(entry);
+        drop(archive);
+        fs::remove_dir_all(source).unwrap();
     }
 }
