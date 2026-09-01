@@ -16,7 +16,7 @@ use tokio::{
     sync::mpsc,
 };
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
-use tokio_util::sync::CancellationToken;
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::transport::Endpoint;
 
 use flash_cat_common::{
@@ -53,6 +53,7 @@ struct SenderLifecycle {
     public: CancellationToken,
     specified: CancellationToken,
     selected_local: Arc<OnceLock<bool>>,
+    relay_tasks: TaskTracker,
 }
 
 impl SenderLifecycle {
@@ -63,6 +64,7 @@ impl SenderLifecycle {
             public: root.child_token(),
             specified: root.child_token(),
             selected_local: Arc::new(OnceLock::new()),
+            relay_tasks: TaskTracker::new(),
             root,
         }
     }
@@ -94,6 +96,11 @@ impl SenderLifecycle {
 
     fn cancel(&self) {
         self.root.cancel();
+        self.relay_tasks.close();
+    }
+
+    async fn wait(&self) {
+        self.relay_tasks.wait().await;
     }
 
     fn is_selected(
@@ -369,7 +376,8 @@ impl FlashCatSender {
         let encryptor = self.encryptor.clone();
         let file_collector = self.file_collector.clone();
         let lifecycle = self.lifecycle.clone();
-        tokio::spawn(async move {
+        let relay_tasks = lifecycle.relay_tasks.clone();
+        relay_tasks.spawn(async move {
             if let Err(e) = Self::relay_channel(
                 relay_type.clone(),
                 encryptor,
@@ -963,6 +971,11 @@ impl FlashCatSender {
         self.lifecycle.root.cancelled().await
     }
 
+    /// Wait until relay channel tasks have finished their shutdown handshake.
+    pub async fn shutdown_complete(&self) {
+        self.lifecycle.wait().await;
+    }
+
     fn clean_zip_files(&self) -> Result<()> {
         remove_files(self.zip_files.as_slice())
     }
@@ -1021,5 +1034,82 @@ impl FlashCatSender {
     ) -> Result<()> {
         tx.send(msg).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{net::TcpListener, sync::Arc, time::Duration};
+
+    use flash_cat_common::{proto::ClientType, utils::fs::FileCollector};
+
+    use super::*;
+    use crate::{ReceiverInteractionMessage, receiver::FlashCatReceiver};
+
+    fn unused_local_addr() -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap()
+    }
+
+    #[tokio::test]
+    async fn shutdown_complete_delivers_peer_termination() {
+        let relay_addr = unused_local_addr();
+        let relay = Arc::new(Relay::new(None, false).unwrap());
+        let running_relay = Arc::clone(&relay);
+        let relay_task = tokio::spawn(async move { running_relay.bind(relay_addr).await });
+        let relay_endpoint = format!("http://{relay_addr}");
+
+        for _ in 0..50 {
+            if RelayServiceClient::connect(relay_endpoint.clone()).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let share_code = "aa-bbbb-cccc".to_string();
+        let sender = Arc::new(
+            FlashCatSender::new_with_file_collector(
+                share_code.clone(),
+                Some(relay_endpoint.clone()),
+                FileCollector::default(),
+                ClientType::Cli,
+                false,
+            )
+            .unwrap(),
+        );
+        let _sender_stream = Arc::clone(&sender).start().await.unwrap();
+
+        let receiver = Arc::new(FlashCatReceiver::new(share_code, Some(relay_endpoint), None, ClientType::Cli, false).unwrap());
+        let mut receiver_stream = Arc::clone(&receiver).start().await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while let Some(message) = receiver_stream.next().await {
+                if matches!(message, ReceiverInteractionMessage::SendFilesRequest(_)) {
+                    return;
+                }
+            }
+            panic!("receiver stream ended before the transfer request");
+        })
+        .await
+        .expect("sender and receiver did not establish a relay channel");
+
+        sender.shutdown();
+        tokio::time::timeout(Duration::from_secs(2), sender.shutdown_complete()).await.expect("sender relay task did not shut down");
+
+        let peer_was_notified = tokio::time::timeout(Duration::from_secs(2), async {
+            while let Some(message) = receiver_stream.next().await {
+                if matches!(message, ReceiverInteractionMessage::OtherClose) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .expect("receiver remained blocked after sender shutdown");
+        assert!(peer_was_notified);
+
+        receiver.shutdown();
+        relay.shutdown();
+        relay_task.await.unwrap().unwrap();
     }
 }

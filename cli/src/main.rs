@@ -156,8 +156,9 @@ async fn send(send_cmd: SendCmd) -> Result<()> {
     };
 
     tokio::try_join!(send_task, signals_task)?;
-    // Ensure that the channel is closed
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    // Do not let the runtime drop the relay close request after Ctrl+C. The
+    // receiver relies on that handshake to leave its receive loop promptly.
+    send.shutdown_complete().await;
     Ok(())
 }
 

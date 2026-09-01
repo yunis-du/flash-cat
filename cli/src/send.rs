@@ -155,4 +155,8 @@ impl Send {
     pub async fn terminated(&self) {
         self.shutdown.wait().await
     }
+
+    pub async fn shutdown_complete(&self) {
+        self.sender.shutdown_complete().await
+    }
 }
