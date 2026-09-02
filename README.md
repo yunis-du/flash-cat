@@ -9,7 +9,7 @@ Securely send the file folder from one computer to another computer.
 - support **resume transfer from breakpoint**
 - easy **cross-platform** transfers (Windows, Linux, Mac)
 
-![dream_TradingCard](./flash-cat-demo.gif)
+![Flash Cat CLI file transfer demo](./flash-cat-demo.gif)
 
 ## Install
 

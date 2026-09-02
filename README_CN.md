@@ -7,7 +7,7 @@
 - 支持**断点续传**
 - 简单的**跨平台**传输 (Windows, Linux, Mac)
 
-![dream_TradingCard](./flash-cat-demo.gif)
+![Flash Cat CLI 文件传输演示](./flash-cat-demo.gif)
 
 ## 安装
 

@@ -1,8 +1,15 @@
-use std::{borrow::Cow, collections::HashMap, fmt::Write};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    fmt::Write,
+    time::{Duration, Instant},
+};
 
 use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressState, ProgressStyle};
 
 use flash_cat_common::format::HumanDuration;
+
+const PROGRESS_REFRESH_INTERVAL: Duration = Duration::from_millis(80);
 
 pub struct Progress {
     num_files: u64,
@@ -13,6 +20,7 @@ pub struct Progress {
     file_info: HashMap<u64, (String, u64)>,
     file_positions: HashMap<u64, u64>,
     progress_bar_map: HashMap<u64, ProgressBar>,
+    last_progress_draw: HashMap<u64, Instant>,
     finished_count: u64,
 }
 
@@ -31,6 +39,7 @@ impl Progress {
             file_info: HashMap::new(),
             file_positions: HashMap::new(),
             progress_bar_map: HashMap::new(),
+            last_progress_draw: HashMap::new(),
             finished_count: 0,
         }
     }
@@ -72,9 +81,9 @@ impl Progress {
             return;
         }
         let prefix = format!("{:<width$}", "Total", width = self.max_file_name_len);
-        let total_pb = ProgressBar::new(self.num_files).with_prefix(prefix).with_message(format!("{}/{}", HumanBytes(0), HumanBytes(self.total_size)));
+        let total_pb = ProgressBar::new(self.total_size).with_prefix(prefix).with_message(format!("0/{}", self.num_files));
         total_pb.set_style(
-            ProgressStyle::with_template("  ------------------------\n  {prefix:.bold.green} [{bar:50.cyan/blue}] {msg} • {pos}/{len}")
+            ProgressStyle::with_template("  ------------------------\n  {prefix:.bold.green} [{bar:50.cyan/blue}] {bytes}/{total_bytes} • {msg}")
                 .unwrap()
                 .progress_chars("#>-"),
         );
@@ -115,7 +124,8 @@ impl Progress {
     fn update_total_file_count(&self) {
         if let Some(total_bar) = &self.total_bar {
             let active_count = self.progress_bar_map.len() as u64;
-            total_bar.set_position((self.finished_count + active_count).min(self.num_files));
+            let current_count = (self.finished_count + active_count).min(self.num_files);
+            total_bar.set_message(format!("{}/{}", current_count, self.num_files));
         }
     }
 
@@ -127,7 +137,7 @@ impl Progress {
         self.file_positions.insert(file_id, new_pos);
         if let Some(total_bar) = &self.total_bar {
             let transferred = self.file_positions.values().copied().sum::<u64>();
-            total_bar.set_message(format!("{}/{}", HumanBytes(transferred), HumanBytes(self.total_size)));
+            total_bar.set_position(transferred.min(self.total_size));
         }
     }
 
@@ -162,6 +172,12 @@ impl Progress {
         file_id: u64,
         pos: u64,
     ) {
+        let now = Instant::now();
+        if self.last_progress_draw.get(&file_id).is_some_and(|last_draw| now.duration_since(*last_draw) < PROGRESS_REFRESH_INTERVAL) {
+            return;
+        }
+        self.last_progress_draw.insert(file_id, now);
+
         self.ensure_bar(file_id);
         if let Some(progress_bar) = self.progress_bar_map.get(&file_id) {
             if progress_bar.position() == 0 {
@@ -170,12 +186,18 @@ impl Progress {
             progress_bar.set_position(pos);
         }
         self.update_total_bytes(file_id, pos);
+        if let Some(total_bar) = &self.total_bar {
+            total_bar.force_draw();
+        } else if let Some(progress_bar) = self.progress_bar_map.get(&file_id) {
+            progress_bar.force_draw();
+        }
     }
 
     pub fn finish(
         &mut self,
         file_id: u64,
     ) {
+        self.last_progress_draw.remove(&file_id);
         self.ensure_bar(file_id);
         if let Some(progress_bar) = self.progress_bar_map.remove(&file_id) {
             let summary = format!(
@@ -198,6 +220,7 @@ impl Progress {
         &mut self,
         file_id: u64,
     ) {
+        self.last_progress_draw.remove(&file_id);
         if let Some((name, _)) = self.file_info.get(&file_id) {
             let _ = self.multi.println(format!("skip '{}'", name));
         }
@@ -234,16 +257,28 @@ mod tests {
     use super::Progress;
 
     #[test]
-    fn total_count_includes_the_active_file() {
+    fn total_bar_tracks_bytes_separately_from_file_count() {
         let mut progress = Progress::new(2, 8, 30);
 
         progress.add_progress("first", 1, 10);
-        assert_eq!(progress.total_bar.as_ref().map(|bar| bar.position()), Some(1));
+        let total_bar = progress.total_bar.as_ref().unwrap();
+        assert_eq!(total_bar.position(), 0);
+        assert_eq!(total_bar.message(), "1/2");
 
         progress.finish(1);
-        assert_eq!(progress.total_bar.as_ref().map(|bar| bar.position()), Some(1));
+        let total_bar = progress.total_bar.as_ref().unwrap();
+        assert_eq!(total_bar.position(), 10);
+        assert_eq!(total_bar.message(), "1/2");
 
         progress.add_progress("second", 2, 20);
-        assert_eq!(progress.total_bar.as_ref().map(|bar| bar.position()), Some(2));
+        let total_bar = progress.total_bar.as_ref().unwrap();
+        assert_eq!(total_bar.position(), 10);
+        assert_eq!(total_bar.message(), "2/2");
+
+        progress.set_position(2, 5);
+        let total_bar = progress.total_bar.as_ref().unwrap();
+        assert_eq!(total_bar.position(), 15);
+        assert_eq!(total_bar.length(), Some(30));
+        assert_eq!(total_bar.message(), "2/2");
     }
 }
