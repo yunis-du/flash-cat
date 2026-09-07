@@ -9,8 +9,7 @@ use flash_cat_common::{
     },
 };
 use flash_cat_core::{SenderInteractionMessage, sender::FlashCatSender};
-use gpui::{Context, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, div, prelude::FluentBuilder};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Disableable, IconName, Sizable,
     button::{Button, ButtonVariants},
     clipboard::Clipboard,
@@ -19,6 +18,7 @@ use gpui_component::{
     spinner::Spinner,
     v_flex,
 };
+use gpui_kit::{Context, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, div, prelude::FluentBuilder};
 use rust_i18n::t;
 use tokio_stream::StreamExt;
 

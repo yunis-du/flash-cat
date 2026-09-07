@@ -1,7 +1,6 @@
 use std::path::Path;
 
-use gpui::{AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, IconName, Sizable,
     button::{Button, ButtonVariants},
     h_flex,
@@ -9,6 +8,7 @@ use gpui_component::{
     label::Label,
     v_flex,
 };
+use gpui_kit::{AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div};
 
 use crate::{
     assets::CustomIconName,

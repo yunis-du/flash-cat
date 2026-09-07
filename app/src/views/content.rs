@@ -1,5 +1,5 @@
-use gpui::{Entity, Window, div, prelude::*};
-use gpui_component::v_flex;
+use gpui_kit::component::v_flex;
+use gpui_kit::{Entity, Window, div, prelude::*};
 use tracing::{debug, info};
 
 use crate::{

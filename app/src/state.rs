@@ -1,7 +1,7 @@
 use anyhow::Result;
 use flash_cat_common::consts::PUBLIC_RELAY;
-use gpui::{App, AppContext, Bounds, Context, Entity, Global, Pixels};
-use gpui_component::ThemeMode;
+use gpui_kit::component::ThemeMode;
+use gpui_kit::{App, AppContext, Bounds, Context, Entity, Global, Pixels};
 use locale_config::Locale;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
@@ -147,7 +147,7 @@ impl FlashCatAppGlobalStore {
         &self,
         cx: &mut C,
         update: impl FnOnce(&mut FlashCatAppState, &mut Context<FlashCatAppState>) -> R,
-    ) -> C::Result<R> {
+    ) -> R {
         self.app_state.update(cx, update)
     }
 
@@ -186,20 +186,18 @@ pub fn update_app_state_and_save<F>(
         });
 
         // persist to disk in background executor
-        if let Ok(state) = current_state {
-            cx.background_executor()
-                .spawn(async move {
-                    if let Err(e) = save_app_state(&state) {
-                        error!(error = %e, action = action_name, "Failed to save state");
-                    } else {
-                        info!(action = action_name, "State saved successfully");
-                    }
-                })
-                .await;
-        }
+        cx.background_executor()
+            .spawn(async move {
+                if let Err(e) = save_app_state(&current_state) {
+                    error!(error = %e, action = action_name, "Failed to save state");
+                } else {
+                    info!(action = action_name, "State saved successfully");
+                }
+            })
+            .await;
 
         // refresh windows to apply visual changes (theme/locale)
-        cx.update(|cx| cx.refresh_windows()).ok();
+        cx.update(|cx| cx.refresh_windows());
     })
     .detach();
 }

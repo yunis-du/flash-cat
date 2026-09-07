@@ -1,5 +1,5 @@
-use gpui::Action;
-use gpui::KeyBinding;
+use gpui_kit::Action;
+use gpui_kit::KeyBinding;
 use schemars::JsonSchema;
 use serde::Deserialize;
 

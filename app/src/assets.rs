@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 
 use anyhow::anyhow;
-use gpui::{AssetSource, Result, SharedString};
-use gpui_component::Icon;
-use gpui_component_assets::Assets as ComponentAssets;
+use gpui_kit::assets::Assets as ComponentAssets;
+use gpui_kit::component::Icon;
+use gpui_kit::{AssetSource, Result, SharedString};
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]

@@ -15,7 +15,7 @@ version = "2.3.6"
 description= "Securely send the file folder from one computer to another computer."
 edition = "2024"
 repository = "https://github.com/yunis-du/flash-cat"
-rust-version = "1.85"
+rust-version = "1.92"
 
 [profile.release]
 lto = true

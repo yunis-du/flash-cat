@@ -1,6 +1,6 @@
 use chrono::{Datelike, Local};
-use gpui::{App, Bounds, TitlebarOptions, Window, WindowBounds, WindowKind, WindowOptions, prelude::*, px, size};
-use gpui_component::{ActiveTheme, Icon, h_flex, label::Label, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, h_flex, label::Label, v_flex};
+use gpui_kit::{App, Bounds, TitlebarOptions, Window, WindowBounds, WindowKind, WindowOptions, prelude::*, px, size};
 
 use crate::assets::CustomIconName;
 

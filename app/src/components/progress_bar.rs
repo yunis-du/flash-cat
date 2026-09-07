@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
-use gpui::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
-use gpui_component::{h_flex, label::Label, progress::Progress, v_flex};
+use gpui_kit::component::{h_flex, label::Label, progress::Progress, v_flex};
+use gpui_kit::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
 
 use flash_cat_common::utils::{human_bytes, human_duration};
 
@@ -88,28 +88,31 @@ impl RenderOnce for ProgressBar {
             v_flex
                 .child(Label::new(self.file_name).text_sm())
                 .child(
-                    h_flex().justify_between().child(div().flex_1().max_w_40().child(Progress::new().value(precent * 100.0))).child(
-                        Label::new(if self.current_progress >= self.file_size {
-                            // Finished: show elapsed time (use recorded elapsed to avoid continued counting)
-                            let elapsed = self.finished_elapsed.unwrap_or_else(|| self.started_at.map(|s| s.elapsed()).unwrap_or(Duration::ZERO));
-                            format!("{} • in {}", human_bytes(self.file_size), human_duration(elapsed))
-                        } else {
-                            // In progress: show ETA
-                            format!(
-                                "{}/{} • {}/s • ETA {}",
-                                human_bytes(self.current_progress),
-                                human_bytes(self.file_size),
-                                human_bytes(per_sec as u64),
-                                if self.current_progress == 0 {
-                                    human_duration(std::time::Duration::ZERO)
-                                } else {
-                                    human_duration(self.pb.eta())
-                                },
-                            )
-                        })
-                        .text_xs()
-                        .flex_shrink_0(),
-                    ),
+                    h_flex()
+                        .justify_between()
+                        .child(div().flex_1().max_w_40().child(Progress::new(("file-progress", self.file_id)).value(precent * 100.0)))
+                        .child(
+                            Label::new(if self.current_progress >= self.file_size {
+                                // Finished: show elapsed time (use recorded elapsed to avoid continued counting)
+                                let elapsed = self.finished_elapsed.unwrap_or_else(|| self.started_at.map(|s| s.elapsed()).unwrap_or(Duration::ZERO));
+                                format!("{} • in {}", human_bytes(self.file_size), human_duration(elapsed))
+                            } else {
+                                // In progress: show ETA
+                                format!(
+                                    "{}/{} • {}/s • ETA {}",
+                                    human_bytes(self.current_progress),
+                                    human_bytes(self.file_size),
+                                    human_bytes(per_sec as u64),
+                                    if self.current_progress == 0 {
+                                        human_duration(std::time::Duration::ZERO)
+                                    } else {
+                                        human_duration(self.pb.eta())
+                                    },
+                                )
+                            })
+                            .text_xs()
+                            .flex_shrink_0(),
+                        ),
                 )
                 .into_any_element()
         }

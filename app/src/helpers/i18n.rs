@@ -1,5 +1,5 @@
-use gpui::App;
-use gpui::SharedString;
+use gpui_kit::App;
+use gpui_kit::SharedString;
 use rust_i18n::t;
 
 use crate::state::FlashCatAppGlobalStore;

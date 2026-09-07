@@ -1,10 +1,10 @@
-use gpui::{App, Context, Corner, Window, prelude::*};
-use gpui_component::{
+use gpui_kit::component::{
     IconName, Sizable, ThemeMode, TitleBar,
     button::{Button, ButtonVariants},
     h_flex,
     menu::{DropdownMenu, PopupMenu},
 };
+use gpui_kit::{Anchor, App, Context, Window, prelude::*};
 
 use crate::{
     helpers::{LocaleAction, ThemeAction, i18n_titlebar},
@@ -73,13 +73,13 @@ impl Render for TitleBarView {
                             .small()
                             .ghost()
                             .dropdown_menu(move |this, _, cx| Self::render_settings_menu(this, cx))
-                            .anchor(Corner::TopRight),
+                            .anchor(Anchor::TopRight),
                     )
                     .child(
                         Button::new("github")
                             .cursor_pointer()
                             .tooltip(i18n_titlebar(cx, "github_tooltip"))
-                            .icon(IconName::GitHub)
+                            .icon(IconName::Github)
                             .small()
                             .ghost()
                             .on_click(|_, _, cx| cx.open_url("https://github.com/yunis-du/flash-cat")),

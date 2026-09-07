@@ -1,5 +1,5 @@
-use gpui::{Context, FontWeight, Image, ImageFormat, IntoElement, ParentElement, Render, Styled, Window, img, px};
-use gpui_component::{ActiveTheme, h_flex, label::Label, v_flex};
+use gpui_kit::component::{ActiveTheme, h_flex, label::Label, v_flex};
+use gpui_kit::{Context, FontWeight, Image, ImageFormat, IntoElement, ParentElement, Render, Styled, Window, img, px};
 use std::sync::Arc;
 
 use crate::helpers::i18n_common;

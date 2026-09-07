@@ -1,5 +1,5 @@
-use gpui::{Context, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, div, prelude::FluentBuilder, px};
-use gpui_component::{ActiveTheme, Icon, IconName, h_flex, label::Label, list::ListItem};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, h_flex, label::Label, list::ListItem};
+use gpui_kit::{Context, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, div, prelude::FluentBuilder, px};
 
 use crate::{
     assets::CustomIconName,

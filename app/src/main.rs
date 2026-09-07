@@ -1,9 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 #[cfg(not(target_os = "linux"))]
-use gpui::TitlebarOptions;
-use gpui::{App, Application, Bounds, Entity, Menu, MenuItem, Window, WindowAppearance, WindowBounds, WindowOptions, prelude::*, px, size};
-use gpui_component::{ActiveTheme, Root, Theme, ThemeMode, v_flex};
+use gpui_kit::TitlebarOptions;
+use gpui_kit::component::{ActiveTheme, Root, Theme, ThemeMode, v_flex};
+use gpui_kit::{App, Bounds, Entity, Menu, MenuItem, Window, WindowAppearance, WindowBounds, WindowOptions, prelude::*, px, size};
 
 use crate::{
     helpers::{LocaleAction, MemuAction, ThemeAction, new_hot_keys},
@@ -77,12 +77,12 @@ impl Render for FlashCatApp {
 }
 
 fn main() {
-    let app = Application::new().with_assets(assets::Assets);
+    let app = gpui_kit::application().with_assets(assets::Assets);
     let app_state = FlashCatAppState::try_new().unwrap_or_else(|_| FlashCatAppState::new());
 
     app.run(move |cx| {
         // This must be called before using any GPUI Component features.
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
 
         cx.activate(true);
         let window_bounds = {
@@ -147,6 +147,7 @@ fn main() {
         cx.set_menus(vec![Menu {
             name: "FlashCatApp".into(),
             items: vec![MenuItem::action("About", MemuAction::About), MenuItem::action("Quit", MemuAction::Quit)],
+            disabled: false,
         }]);
 
         cx.spawn(async move |cx| {
@@ -157,7 +158,7 @@ fn main() {
                     titlebar: Some(TitlebarOptions {
                         title: None,
                         appears_transparent: true,
-                        traffic_light_position: Some(gpui::point(px(9.0), px(9.0))),
+                        traffic_light_position: Some(gpui_kit::point(px(9.0), px(9.0))),
                     }),
                     show: true,
                     is_resizable: false,

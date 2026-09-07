@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use flash_cat_common::{consts::PUBLIC_RELAY, proto::ClientType};
 use flash_cat_core::{ReceiverConfirm, ReceiverInteractionMessage, receiver::FlashCatReceiver};
-use gpui::{AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, div, prelude::FluentBuilder};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Disableable, Sizable,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
@@ -13,6 +12,7 @@ use gpui_component::{
     spinner::Spinner,
     v_flex,
 };
+use gpui_kit::{AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, div, prelude::FluentBuilder};
 use rust_i18n::t;
 use tokio_stream::StreamExt;
 

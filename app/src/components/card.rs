@@ -1,5 +1,5 @@
-use gpui::{AnyElement, App, ElementId, Fill, SharedString, StyleRefinement, Styled, Window, div, prelude::*, px};
-use gpui_component::{ActiveTheme, Colorize, h_flex, label::Label, scroll::ScrollableElement};
+use gpui_kit::component::{ActiveTheme, Colorize, h_flex, label::Label, scroll::ScrollableElement};
+use gpui_kit::{AnyElement, App, ElementId, Fill, SharedString, StyleRefinement, Styled, Window, div, prelude::*, px};
 
 #[derive(IntoElement)]
 pub struct Card {
