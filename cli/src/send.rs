@@ -65,6 +65,7 @@ impl Send {
             file_collector.max_file_name_length,
             file_collector.total_size,
         );
+        let connecting = progress.add_spinner("Connecting to relay...");
 
         for file in file_collector.files.iter() {
             progress.register_file(&file.name, file.file_id, file.size);
@@ -85,6 +86,7 @@ impl Send {
                                 };
                                 if !share_code_printed && relay_type == expected_relay {
                                     share_code_printed = true;
+                                    connecting.finish_and_clear();
                                     progress.println(&format!("Share code is: {}", self.share_code));
                                     progress.println("On the other computer run:");
                                     progress.println("");
@@ -96,6 +98,7 @@ impl Send {
                                 }
                             }
                             SenderInteractionMessage::Error(e) => {
+                                connecting.finish_and_clear();
                                 progress.println(&format!("An error occurred: {}", e));
                                 self.shutdown();
                             }
@@ -104,6 +107,7 @@ impl Send {
                                 self.shutdown();
                             }
                             SenderInteractionMessage::RelayFailed((relay_type, error)) => {
+                                connecting.finish_and_clear();
                                 if RelayType::Local.eq(&relay_type) || RelayType::Specify.eq(&relay_type) {
                                     process::exit(1);
                                 } else {
@@ -135,15 +139,19 @@ impl Send {
                                 self.shutdown();
                             }
                         }
+                    } else {
+                        break;
                     }
                 }
             }
             Err(e) => {
+                connecting.finish_and_clear();
                 self.shutdown();
                 return Err(e);
             }
         }
 
+        connecting.finish_and_clear();
         Ok(())
     }
 

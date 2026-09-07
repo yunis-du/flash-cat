@@ -55,6 +55,16 @@ impl Progress {
         self.total_size = total_size;
     }
 
+    pub fn add_spinner(
+        &self,
+        msg: impl Into<Cow<'static, str>>,
+    ) -> ProgressBar {
+        let spinner = self.multi.add(ProgressBar::new_spinner().with_message(msg));
+        spinner.set_style(ProgressStyle::with_template("{spinner:.green} {msg}").unwrap());
+        spinner.enable_steady_tick(PROGRESS_REFRESH_INTERVAL);
+        spinner
+    }
+
     /// Register file metadata for lazy progress bar creation.
     pub fn register_file(
         &mut self,
