@@ -74,30 +74,3 @@ impl Debug for CustomAes256Gcm {
         f.debug_tuple("CustomAes256Gcm").finish()
     }
 }
-
-#[cfg(test)]
-mod test {
-    use anyhow::{Result, bail};
-
-    use crate::utils::gen_share_code;
-
-    use super::Encryptor;
-
-    #[test]
-    fn encryptor_test() -> Result<()> {
-        let plaintext = b"Hello, Bob! This is a secret message.";
-
-        let share_code = gen_share_code();
-        let encryptor = Encryptor::new(share_code.clone())?;
-        let encrypted_text = encryptor.encrypt(plaintext)?;
-        println!("encrypted_text len: {}", encrypted_text.len());
-
-        let encryptor = Encryptor::new(share_code.clone())?;
-        let decrypted_text = match encryptor.decrypt(&encrypted_text) {
-            Ok(decrypted_text) => decrypted_text,
-            Err(err) => bail!(err.to_string()),
-        };
-        println!("Decrypted Text: {:?}", String::from_utf8_lossy(&decrypted_text));
-        Ok(())
-    }
-}

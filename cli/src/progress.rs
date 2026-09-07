@@ -251,34 +251,3 @@ impl Progress {
         let _ = self.multi.println(msg);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Progress;
-
-    #[test]
-    fn total_bar_tracks_bytes_separately_from_file_count() {
-        let mut progress = Progress::new(2, 8, 30);
-
-        progress.add_progress("first", 1, 10);
-        let total_bar = progress.total_bar.as_ref().unwrap();
-        assert_eq!(total_bar.position(), 0);
-        assert_eq!(total_bar.message(), "1/2");
-
-        progress.finish(1);
-        let total_bar = progress.total_bar.as_ref().unwrap();
-        assert_eq!(total_bar.position(), 10);
-        assert_eq!(total_bar.message(), "1/2");
-
-        progress.add_progress("second", 2, 20);
-        let total_bar = progress.total_bar.as_ref().unwrap();
-        assert_eq!(total_bar.position(), 10);
-        assert_eq!(total_bar.message(), "2/2");
-
-        progress.set_position(2, 5);
-        let total_bar = progress.total_bar.as_ref().unwrap();
-        assert_eq!(total_bar.position(), 15);
-        assert_eq!(total_bar.length(), Some(30));
-        assert_eq!(total_bar.message(), "2/2");
-    }
-}

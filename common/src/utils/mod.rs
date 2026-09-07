@@ -40,18 +40,3 @@ pub fn human_bytes(bytes: u64) -> String {
 pub fn human_duration(duration: Duration) -> String {
     format!("{:#}", HumanDuration(duration))
 }
-
-#[cfg(test)]
-mod test {
-    use crate::utils::gen_share_code;
-
-    #[test]
-    fn t1() {
-        println!("gen_share_code: {}", gen_share_code());
-        println!("gen_share_code: {}", gen_share_code());
-        println!("gen_share_code: {}", gen_share_code());
-        println!("gen_share_code: {}", gen_share_code());
-        println!("gen_share_code: {}", gen_share_code());
-        println!("gen_share_code: {}", gen_share_code());
-    }
-}

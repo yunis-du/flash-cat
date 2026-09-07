@@ -2225,6 +2225,7 @@ dependencies = [
  "log",
  "prost",
  "rand 0.10.2",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tokio-util",

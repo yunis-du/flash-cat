@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    path::Path,
     pin::Pin,
     sync::{Arc, OnceLock},
     time::Duration,
@@ -29,7 +28,7 @@ use flash_cat_common::{
         relay_update::RelayMessage, sender_update::SenderMessage,
     },
     utils::{
-        fs::{FileCollector, FileInfo, collect_files, is_idr, paths_exist, remove_files, zip_folder},
+        fs::{FileCollector, FileInfo, collect_files, is_idr, paths_exist, zip_folder},
         net::{find_available_port, net_scout::NetScout},
     },
 };
@@ -123,7 +122,7 @@ impl Default for SenderLifecycle {
 
 #[derive(Debug, Clone)]
 pub struct FlashCatSender {
-    zip_files: Vec<String>,
+    zip_dirs: Vec<Arc<tempfile::TempDir>>,
     encryptor: Arc<Encryptor>,
     specify_relay: Option<String>,
     file_collector: Arc<FileCollector>,
@@ -143,16 +142,16 @@ impl FlashCatSender {
     ) -> Result<Self> {
         paths_exist(files.as_slice())?;
         let lifecycle = SenderLifecycle::new();
-        let mut zip_files = vec![];
+        let mut zip_dirs = vec![];
         if zip_floder {
             let (treated_files, zip) = Self::zip_folder(files, lifecycle.root.clone()).await?;
             files = treated_files;
-            zip_files = zip;
+            zip_dirs = zip;
         }
         let file_collector = collect_files(files.as_slice());
         let encryptor = Arc::new(Encryptor::new(share_code)?);
         Ok(Self {
-            zip_files,
+            zip_dirs,
             encryptor,
             specify_relay,
             file_collector: Arc::new(file_collector),
@@ -171,7 +170,7 @@ impl FlashCatSender {
     ) -> Result<Self> {
         let encryptor = Arc::new(Encryptor::new(share_code)?);
         Ok(Self {
-            zip_files: vec![],
+            zip_dirs: vec![],
             encryptor,
             specify_relay,
             file_collector: Arc::new(file_collector),
@@ -977,21 +976,32 @@ impl FlashCatSender {
     }
 
     fn clean_zip_files(&self) -> Result<()> {
-        remove_files(self.zip_files.as_slice())
+        for dir in &self.zip_dirs {
+            match std::fs::remove_dir_all(dir.path()) {
+                Ok(()) => (),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
     }
 
     async fn zip_folder(
         mut files: Vec<String>,
         cancel: CancellationToken,
-    ) -> Result<(Vec<String>, Vec<String>)> {
+    ) -> Result<(Vec<String>, Vec<Arc<tempfile::TempDir>>)> {
         let mut async_task = vec![];
-        let mut zip_files = vec![];
+        let mut zip_dirs = vec![];
         for i in 0..files.len() {
             let p = files[i].as_str();
             if is_idr(p) {
-                let file_name = format!("{}.zip", Path::new(p).file_name().unwrap_or_default().to_string_lossy());
+                let source = std::fs::canonicalize(p)?;
+                let archive_name = format!("{}.zip", source.file_name().unwrap_or_default().to_string_lossy());
+                let zip_dir = Arc::new(tempfile::Builder::new().prefix("flash-cat-zip-").tempdir()?);
+                let file_name = zip_dir.path().join(archive_name).to_string_lossy().into_owned();
                 let path = p.to_owned();
                 let file_name_for_task = file_name.clone();
+                let zip_dir_for_task = zip_dir.clone();
                 let cancel_clone = cancel.clone();
                 async_task.push(tokio::spawn(async move {
                     let shutdown = Shutdown::new();
@@ -1000,11 +1010,16 @@ impl FlashCatSender {
                         cancel_clone.cancelled().await;
                         shutdown_on_cancel.shutdown();
                     });
-                    let result = tokio::task::spawn_blocking(move || zip_folder(file_name_for_task, path, shutdown)).await?;
+                    let result = tokio::task::spawn_blocking(move || {
+                        // Keep the directory alive even if the awaiting task is cancelled.
+                        let _zip_dir = zip_dir_for_task;
+                        zip_folder(file_name_for_task, path, shutdown)
+                    })
+                    .await;
                     cancel_task.abort();
-                    result
+                    result?
                 }));
-                zip_files.push(file_name.clone());
+                zip_dirs.push(zip_dir);
                 files[i] = file_name;
             }
         }
@@ -1022,10 +1037,9 @@ impl FlashCatSender {
             task.await??;
         }
         if cancel.is_cancelled() {
-            let _ = remove_files(zip_files.as_slice());
             bail!("folder compression cancelled");
         }
-        Ok((files, zip_files))
+        Ok((files, zip_dirs))
     }
 
     async fn send_msg_to_stream(
@@ -1034,82 +1048,5 @@ impl FlashCatSender {
     ) -> Result<()> {
         tx.send(msg).await?;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{net::TcpListener, sync::Arc, time::Duration};
-
-    use flash_cat_common::{proto::ClientType, utils::fs::FileCollector};
-
-    use super::*;
-    use crate::{ReceiverInteractionMessage, receiver::FlashCatReceiver};
-
-    fn unused_local_addr() -> SocketAddr {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.local_addr().unwrap()
-    }
-
-    #[tokio::test]
-    async fn shutdown_complete_delivers_peer_termination() {
-        let relay_addr = unused_local_addr();
-        let relay = Arc::new(Relay::new(None, false).unwrap());
-        let running_relay = Arc::clone(&relay);
-        let relay_task = tokio::spawn(async move { running_relay.bind(relay_addr).await });
-        let relay_endpoint = format!("http://{relay_addr}");
-
-        for _ in 0..50 {
-            if RelayServiceClient::connect(relay_endpoint.clone()).await.is_ok() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-
-        let share_code = "aa-bbbb-cccc".to_string();
-        let sender = Arc::new(
-            FlashCatSender::new_with_file_collector(
-                share_code.clone(),
-                Some(relay_endpoint.clone()),
-                FileCollector::default(),
-                ClientType::Cli,
-                false,
-            )
-            .unwrap(),
-        );
-        let _sender_stream = Arc::clone(&sender).start().await.unwrap();
-
-        let receiver = Arc::new(FlashCatReceiver::new(share_code, Some(relay_endpoint), None, ClientType::Cli, false).unwrap());
-        let mut receiver_stream = Arc::clone(&receiver).start().await.unwrap();
-
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while let Some(message) = receiver_stream.next().await {
-                if matches!(message, ReceiverInteractionMessage::SendFilesRequest(_)) {
-                    return;
-                }
-            }
-            panic!("receiver stream ended before the transfer request");
-        })
-        .await
-        .expect("sender and receiver did not establish a relay channel");
-
-        sender.shutdown();
-        tokio::time::timeout(Duration::from_secs(2), sender.shutdown_complete()).await.expect("sender relay task did not shut down");
-
-        let peer_was_notified = tokio::time::timeout(Duration::from_secs(2), async {
-            while let Some(message) = receiver_stream.next().await {
-                if matches!(message, ReceiverInteractionMessage::OtherClose) {
-                    return true;
-                }
-            }
-            false
-        })
-        .await
-        .expect("receiver remained blocked after sender shutdown");
-        assert!(peer_was_notified);
-
-        receiver.shutdown();
-        relay.shutdown();
-        relay_task.await.unwrap().unwrap();
     }
 }

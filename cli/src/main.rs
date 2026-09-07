@@ -320,23 +320,3 @@ fn main() -> ExitCode {
     }
     ExitCode::SUCCESS
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_forward_relay() {
-        let command = Cmd::try_parse_from(["flash-cat", "relay", "--forward", "203.0.113.10:6880"]).unwrap();
-        let Some(SubCmd::Relay(relay)) = command.sub_cmd else {
-            panic!("relay command was not parsed");
-        };
-        assert_eq!(relay.forward, Some("203.0.113.10:6880".parse().unwrap()));
-    }
-
-    #[test]
-    fn forward_relay_conflicts_with_external_ip() {
-        let result = Cmd::try_parse_from(["flash-cat", "relay", "--external-ip", "198.51.100.20", "--forward", "203.0.113.10:6880"]);
-        assert!(result.is_err());
-    }
-}

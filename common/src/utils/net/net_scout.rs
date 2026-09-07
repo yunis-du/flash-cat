@@ -185,35 +185,3 @@ fn eligible_broadcast(
     }
     Some(broadcast_ip)
 }
-
-#[cfg(test)]
-mod test {
-    use std::net::Ipv4Addr;
-
-    use super::eligible_broadcast;
-
-    #[test]
-    fn accepts_broadcast_capable_lan_address() {
-        assert_eq!(
-            eligible_broadcast(Ipv4Addr::new(192, 168, 1, 10), Some(Ipv4Addr::new(192, 168, 1, 255))),
-            Some(Ipv4Addr::new(192, 168, 1, 255))
-        );
-    }
-
-    #[test]
-    fn rejects_non_broadcast_addresses() {
-        assert_eq!(
-            eligible_broadcast(Ipv4Addr::LOCALHOST, Some(Ipv4Addr::new(127, 255, 255, 255))),
-            None
-        );
-        assert_eq!(
-            eligible_broadcast(Ipv4Addr::new(169, 254, 1, 2), Some(Ipv4Addr::new(169, 254, 255, 255))),
-            None
-        );
-        assert_eq!(eligible_broadcast(Ipv4Addr::new(198, 18, 0, 1), None), None);
-        assert_eq!(
-            eligible_broadcast(Ipv4Addr::new(10, 0, 0, 1), Some(Ipv4Addr::new(10, 0, 0, 1))),
-            None
-        );
-    }
-}

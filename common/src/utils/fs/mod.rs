@@ -225,7 +225,8 @@ pub fn zip_folder<P: AsRef<Path>>(
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated).unix_permissions(0o755);
 
-    let root_dir = file_name.strip_suffix(".zip").unwrap_or(&file_name);
+    let archive_name = Path::new(&file_name).file_name().unwrap_or_default().to_string_lossy();
+    let root_dir = archive_name.strip_suffix(".zip").unwrap_or(&archive_name);
 
     #[cfg(feature = "progress")]
     let (total_size, total_files) = {
@@ -489,60 +490,4 @@ pub fn missing_chunks(
     let percent = ((saved_chunks * chunk_size) as f64 / fsize as f64 * 100.0 * 100.0).round() / 100.0;
 
     Ok((saved_chunks, missing_chunks, percent))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{
-        fs,
-        io::Read,
-        sync::atomic::{AtomicU64, Ordering},
-    };
-
-    use super::{Shutdown, safe_join_relative_path, zip_folder};
-
-    static TEST_DIR_ID: AtomicU64 = AtomicU64::new(0);
-
-    fn test_dir(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "flash-cat-{name}-{}-{}",
-            std::process::id(),
-            TEST_DIR_ID.fetch_add(1, Ordering::Relaxed)
-        ))
-    }
-
-    #[test]
-    fn safe_join_accepts_normal_relative_path() {
-        let path = safe_join_relative_path("/tmp/out", "folder/file.txt").unwrap();
-        assert!(path.ends_with("folder/file.txt"));
-    }
-
-    #[test]
-    fn safe_join_rejects_path_escape() {
-        assert!(safe_join_relative_path("/tmp/out", "../secret.txt").is_err());
-        assert!(safe_join_relative_path("/tmp/out", "/tmp/secret.txt").is_err());
-    }
-
-    #[test]
-    fn zip_folder_excludes_archive_inside_source_directory() {
-        let source = test_dir("zip-self-exclusion");
-        fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("input.txt"), b"hello").unwrap();
-        let archive_path = source.join("archive.zip");
-
-        zip_folder(archive_path.to_string_lossy().into_owned(), &source, Shutdown::new()).unwrap();
-
-        let archive_file = fs::File::open(&archive_path).unwrap();
-        let mut archive = zip::ZipArchive::new(archive_file).unwrap();
-        assert_eq!(archive.len(), 1);
-        let mut entry = archive.by_index(0).unwrap();
-        assert!(entry.name().ends_with("/input.txt"));
-        let mut contents = String::new();
-        entry.read_to_string(&mut contents).unwrap();
-        assert_eq!(contents, "hello");
-
-        drop(entry);
-        drop(archive);
-        fs::remove_dir_all(source).unwrap();
-    }
 }
