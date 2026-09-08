@@ -24,6 +24,7 @@ pub enum SenderInteractionMessage {
     Message(String),
     Error(String),
     RelayConnected(RelayType),
+    TransferMode(RelayType),
     ReceiverReject,
     RelayFailed((RelayType, String)),
     ContinueFile(u64),
@@ -37,6 +38,7 @@ pub enum SenderInteractionMessage {
 
 #[derive(Debug, Clone)]
 pub enum ReceiverInteractionMessage {
+    TransferMode(RelayType),
     Message(String),
     Error(String),
     SendFilesRequest(SendFilesRequest),

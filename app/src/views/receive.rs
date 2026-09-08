@@ -249,6 +249,7 @@ impl Render for ReceiveView {
                                         let should_break = view
                                             .update(cx, |view, cx| {
                                                 match msg {
+                                                    ReceiverInteractionMessage::TransferMode(_) => {}
                                                     ReceiverInteractionMessage::Message(msg) => {
                                                         view.notification = NotificationType::Message(msg);
                                                     }

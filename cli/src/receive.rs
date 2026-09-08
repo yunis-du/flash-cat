@@ -47,26 +47,44 @@ impl Receive {
             }
         })?;
         let mut progress = Progress::new(1, 10, 0);
+        let mut transfer_mode = None;
         while !self.shutdown.is_terminated() {
             if let Some(receiver_msg) = stream.next().await {
                 match receiver_msg {
+                    ReceiverInteractionMessage::TransferMode(relay_type) => {
+                        transfer_mode = Some(Progress::transfer_mode_label(relay_type));
+                    }
                     ReceiverInteractionMessage::Message(msg) => println!("{msg}"),
                     ReceiverInteractionMessage::Error(e) => {
                         println!("An error occurred: {}", e.to_string());
                         self.shutdown();
                     }
                     ReceiverInteractionMessage::SendFilesRequest(send_req) => {
-                        print!("Receiving {} files", send_req.num_files);
+                        let files_label = if send_req.num_files == 1 {
+                            "file"
+                        } else {
+                            "files"
+                        };
+                        print!("Receiving {} {files_label}", send_req.num_files);
                         if send_req.num_folders > 0 {
-                            print!(" and {} folders", send_req.num_folders);
+                            let folders_label = if send_req.num_folders == 1 {
+                                "folder"
+                            } else {
+                                "folders"
+                            };
+                            print!(" and {} {folders_label}", send_req.num_folders);
                         }
+                        print!(" • {}", HumanBytes(send_req.total_size));
+                        if let Some(mode) = transfer_mode {
+                            print!(" • {mode}");
+                        }
+                        println!();
                         if self.assumeyes {
-                            println!();
                             progress.update(send_req.num_files, send_req.max_file_name_length as usize, send_req.total_size);
                             self.receiver.send_confirm(ReceiverConfirm::ReceiveConfirm(true)).await?;
                             continue;
                         }
-                        print!(" ({})? (Y/n) ", HumanBytes(send_req.total_size).to_string());
+                        print!("Accept transfer? (y/N) ");
                         stdout().flush()?;
                         let mut input = String::new();
                         stdin().read_line(&mut input)?;

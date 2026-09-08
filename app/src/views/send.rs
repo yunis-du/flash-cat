@@ -331,6 +331,7 @@ impl Render for SendView {
                                 let should_break = view
                                     .update(cx, |view, cx| {
                                         match msg {
+                                            SenderInteractionMessage::TransferMode(_) => {}
                                             SenderInteractionMessage::Message(_msg) => {
                                                 // Handle message notification if needed
                                             }

@@ -8,6 +8,7 @@ use std::{
 use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressState, ProgressStyle};
 
 use flash_cat_common::format::HumanDuration;
+use flash_cat_core::RelayType;
 
 const PROGRESS_REFRESH_INTERVAL: Duration = Duration::from_millis(80);
 
@@ -254,10 +255,18 @@ impl Progress {
         }
     }
 
+    pub fn transfer_mode_label(relay_type: RelayType) -> &'static str {
+        match relay_type {
+            RelayType::Local => "LAN",
+            RelayType::Public | RelayType::Specify => "Relay",
+        }
+    }
+
     pub fn println(
         &self,
         msg: &str,
     ) {
-        let _ = self.multi.println(msg);
+        // Keep status lines separate from stdout prompts, even before any bars exist.
+        self.multi.suspend(|| println!("{msg}"));
     }
 }

@@ -134,7 +134,7 @@ impl FlashCatReceiver {
 
     async fn connect_relay(
         &self,
-        relay_type: RelayType,
+        mut relay_type: RelayType,
         endpoint: Endpoint,
         receiver_stream_tx: mpsc::Sender<ReceiverInteractionMessage>,
         shutdown: Shutdown,
@@ -233,7 +233,10 @@ impl FlashCatReceiver {
             };
 
             match sender_local_relay_endpoint {
-                Some(sender_local_relay_endpoint) => sender_local_relay_endpoint,
+                Some(sender_local_relay_endpoint) => {
+                    relay_type = RelayType::Local;
+                    sender_local_relay_endpoint
+                }
                 None => {
                     if relay.is_some() {
                         let relay = relay.unwrap();
@@ -256,7 +259,17 @@ impl FlashCatReceiver {
         let confirm_rx = self.confirm_rx.clone();
         let output_dir = self.output_dir.clone();
         tokio::spawn(async move {
-            if let Err(e) = Self::relay_channel(encryptor, endpoint, &receiver_stream_tx, confirm_rx, output_dir, shutdown).await {
+            if let Err(e) = Self::relay_channel(
+                encryptor,
+                endpoint,
+                relay_type,
+                &receiver_stream_tx,
+                confirm_rx,
+                output_dir,
+                shutdown,
+            )
+            .await
+            {
                 let _ = &receiver_stream_tx.send(ReceiverInteractionMessage::Error(e.to_string())).await;
             }
         });
@@ -294,6 +307,7 @@ impl FlashCatReceiver {
     async fn relay_channel(
         encryptor: Arc<Encryptor>,
         endpoint: Endpoint,
+        relay_type: RelayType,
         receiver_stream_tx: &mpsc::Sender<ReceiverInteractionMessage>,
         confirm_rx: async_channel::Receiver<ReceiverConfirm>,
         output_dir: PathBuf,
@@ -309,6 +323,7 @@ impl FlashCatReceiver {
 
         let mut file_states: HashMap<u64, ReceiveFileState> = HashMap::new();
         let mut share_confirm = None;
+        let mut transfer_mode_reported = false;
 
         let mut ping_interval = tokio::time::interval(PING_INTERVAL);
         let mut reconnect_attempt = 0u32;
@@ -532,7 +547,12 @@ impl FlashCatReceiver {
 
             match message {
                 RelayMessage::Join(_) => receiver_stream_tx.send(ReceiverInteractionMessage::Message("Invalid join message".to_string())).await?,
-                RelayMessage::Joined(_) => (),
+                RelayMessage::Joined(_) => {
+                    if !transfer_mode_reported {
+                        Self::send_msg_to_stream(receiver_stream_tx, ReceiverInteractionMessage::TransferMode(relay_type.clone())).await?;
+                        transfer_mode_reported = true;
+                    }
+                }
                 RelayMessage::Ready(_) => (),
                 RelayMessage::Sender(sender) => {
                     if let Some(sender_message) = sender.sender_message {

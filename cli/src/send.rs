@@ -77,6 +77,13 @@ impl Send {
                 while !self.shutdown.is_terminated() {
                     if let Some(sender_msg) = stream.next().await {
                         match sender_msg {
+                            SenderInteractionMessage::TransferMode(relay_type) => {
+                                connecting.finish_and_clear();
+                                progress.println(&format!(
+                                    "\nReceiver connected • {}\n",
+                                    Progress::transfer_mode_label(relay_type)
+                                ));
+                            }
                             SenderInteractionMessage::Message(msg) => progress.println(&msg),
                             SenderInteractionMessage::RelayConnected(relay_type) => {
                                 let expected_relay = if self.relay.is_some() {

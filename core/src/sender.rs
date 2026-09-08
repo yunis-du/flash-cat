@@ -592,6 +592,7 @@ impl FlashCatSender {
                     }
                     if !request_sent {
                         request_sent = true;
+                        Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::TransferMode(relay_type.clone())).await?;
                         send_msg_to_relay(
                             &tx,
                             RelayMessage::Sender(SenderUpdate {
