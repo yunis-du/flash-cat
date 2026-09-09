@@ -1,272 +1,370 @@
+use flash_cat_common::format::HumanDuration;
+use flash_cat_core::{FileStage, RelayType, TransferPhase};
+use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::{
     borrow::Cow,
     collections::HashMap,
-    fmt::Write,
     time::{Duration, Instant},
 };
 
-use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressState, ProgressStyle};
+const REFRESH: Duration = Duration::from_millis(100);
 
-use flash_cat_common::format::HumanDuration;
-use flash_cat_core::RelayType;
+/// Keep terminal redraws out of an interactive prompt without holding a drawing
+/// lock while waiting for input. Dropping the prompt future also restores output.
+pub(crate) struct PromptDisplay {
+    multi: MultiProgress,
+    bars: Vec<ProgressBar>,
+}
 
-const PROGRESS_REFRESH_INTERVAL: Duration = Duration::from_millis(80);
-
+impl Drop for PromptDisplay {
+    fn drop(&mut self) {
+        self.multi.set_draw_target(ProgressDrawTarget::stderr());
+        for bar in &self.bars {
+            bar.enable_steady_tick(REFRESH);
+        }
+    }
+}
+struct FileProgress {
+    name: String,
+    size: u64,
+    position: u64,
+    baseline: u64,
+    started: Option<Instant>,
+    terminal: bool,
+}
 pub struct Progress {
     num_files: u64,
-    max_file_name_len: usize,
+    name_width: usize,
     total_size: u64,
+    processed: u64,
+    transferred: u64,
+    transfer_started: Option<Instant>,
+    finished: u64,
     multi: MultiProgress,
-    total_bar: Option<ProgressBar>,
-    file_info: HashMap<u64, (String, u64)>,
-    file_positions: HashMap<u64, u64>,
-    progress_bar_map: HashMap<u64, ProgressBar>,
-    last_progress_draw: HashMap<u64, Instant>,
-    finished_count: u64,
+    total: Option<ProgressBar>,
+    files: HashMap<u64, FileProgress>,
+    bars: HashMap<u64, ProgressBar>,
+}
+
+impl Drop for Progress {
+    fn drop(&mut self) {
+        // Keep the last positions visible when an error or cancellation drops
+        // the transfer future. Finishing would incorrectly fill the bars to 100%.
+        for bar in self.bars.values() {
+            bar.disable_steady_tick();
+            bar.abandon_with_message("Interrupted");
+        }
+        if let Some(total) = &self.total {
+            total.abandon_with_message(format!(
+                "{}/{} entries • {} transferred • Interrupted",
+                self.finished,
+                self.num_files,
+                HumanBytes(self.transferred),
+            ));
+        }
+    }
 }
 
 impl Progress {
-    pub fn new(
-        num_files: u64,
-        max_file_name_len: usize,
-        total_size: u64,
-    ) -> Progress {
-        Progress {
-            num_files,
-            max_file_name_len,
-            total_size,
-            multi: MultiProgress::new(),
-            total_bar: None,
-            file_info: HashMap::new(),
-            file_positions: HashMap::new(),
-            progress_bar_map: HashMap::new(),
-            last_progress_draw: HashMap::new(),
-            finished_count: 0,
+    pub(crate) fn pause_for_prompt(&self) -> PromptDisplay {
+        let bars = self.bars.values().cloned().collect::<Vec<_>>();
+        for bar in &bars {
+            bar.disable_steady_tick();
+        }
+        let _ = self.multi.clear();
+        self.multi.set_draw_target(ProgressDrawTarget::hidden());
+        PromptDisplay {
+            multi: self.multi.clone(),
+            bars,
         }
     }
 
+    pub fn new(
+        num_files: u64,
+        name_len: usize,
+        total_size: u64,
+    ) -> Self {
+        Self {
+            num_files,
+            name_width: name_len.min(48),
+            total_size,
+            processed: 0,
+            transferred: 0,
+            transfer_started: None,
+            finished: 0,
+            multi: MultiProgress::new(),
+            total: None,
+            files: HashMap::new(),
+            bars: HashMap::new(),
+        }
+    }
     pub fn update(
         &mut self,
         num_files: u64,
-        max_file_name_len: usize,
+        name_len: usize,
         total_size: u64,
     ) {
         self.num_files = num_files;
-        self.max_file_name_len = max_file_name_len;
+        self.name_width = name_len.min(48);
         self.total_size = total_size;
     }
-
     pub fn add_spinner(
         &self,
         msg: impl Into<Cow<'static, str>>,
     ) -> ProgressBar {
         let spinner = self.multi.add(ProgressBar::new_spinner().with_message(msg));
         spinner.set_style(ProgressStyle::with_template("{spinner:.green} {msg}").unwrap());
-        spinner.enable_steady_tick(PROGRESS_REFRESH_INTERVAL);
+        spinner.enable_steady_tick(REFRESH);
         spinner
     }
-
-    /// Register file metadata for lazy progress bar creation.
     pub fn register_file(
         &mut self,
-        file_name: &str,
-        file_id: u64,
-        total_size: u64,
+        name: &str,
+        id: u64,
+        size: u64,
     ) {
-        self.file_info.insert(file_id, (file_name.to_string(), total_size));
+        self.files.entry(id).or_insert_with(|| FileProgress {
+            name: name.to_owned(),
+            size,
+            position: 0,
+            baseline: 0,
+            started: None,
+            terminal: false,
+        });
     }
-
-    /// Create and immediately show a progress bar (used by receiver on-demand).
     pub fn add_progress(
         &mut self,
-        file_name: &str,
-        file_id: u64,
-        total_size: u64,
+        name: &str,
+        id: u64,
+        size: u64,
     ) {
-        self.file_info.insert(file_id, (file_name.to_string(), total_size));
-        self.ensure_bar(file_id);
+        self.register_file(name, id, size);
+        self.ensure_bar(id);
     }
-
-    fn ensure_total_bar(&mut self) {
-        if self.total_bar.is_some() || self.num_files <= 1 {
-            return;
-        }
-        let prefix = format!("{:<width$}", "Total", width = self.max_file_name_len);
-        let total_pb = ProgressBar::new(self.total_size).with_prefix(prefix).with_message(format!("0/{}", self.num_files));
-        total_pb.set_style(
-            ProgressStyle::with_template("  ------------------------\n  {prefix:.bold.green} [{bar:50.cyan/blue}] {bytes}/{total_bytes} • {msg}")
-                .unwrap()
-                .progress_chars("#>-"),
-        );
-        let total_pb = self.multi.add(total_pb);
-        self.total_bar = Some(total_pb);
-    }
-
     fn ensure_bar(
         &mut self,
-        file_id: u64,
+        id: u64,
     ) {
-        if self.progress_bar_map.contains_key(&file_id) {
+        if self.bars.contains_key(&id) || self.files.get(&id).is_none_or(|f| f.terminal) {
             return;
         }
-        self.ensure_total_bar();
-        let bar_info = self.file_info.get(&file_id).cloned();
-        if let Some((name, total_size)) = bar_info {
-            let file_name = format!("{:<width$}", name, width = self.max_file_name_len);
-            let pb = ProgressBar::new(total_size).with_prefix(file_name);
-            pb.set_style(
-                ProgressStyle::with_template("{spinner:.green} {prefix:.bold.green} [{bar:50.cyan/blue}] {bytes}/{total_bytes} • {bytes_per_sec} • ETA {eta}")
+        if self.total.is_none() && self.num_files > 1 {
+            let prefix = format!("{:<width$}", "Total", width = self.name_width);
+            let bar = self.multi.add(ProgressBar::new(self.total_size).with_prefix(prefix));
+            bar.set_style(
+                ProgressStyle::with_template("  ------------------------\n  {prefix:.bold.green} [{bar:50.cyan/blue}] {bytes}/{total_bytes} • {msg}")
                     .unwrap()
-                    .with_key("eta", |state: &ProgressState, w: &mut dyn Write| {
-                        write!(w, "{:#}", HumanDuration(state.eta())).unwrap()
-                    })
                     .progress_chars("#>-"),
             );
-            let pb = if let Some(total_bar) = &self.total_bar {
-                self.multi.insert_before(total_bar, pb)
-            } else {
-                self.multi.add(pb)
+            self.total = Some(bar);
+            self.update_total();
+        }
+        if let Some(file) = self.files.get(&id) {
+            let name = format!("{:<width$}", truncate(&file.name, 48), width = self.name_width);
+            let bar = ProgressBar::new(file.size).with_prefix(name).with_message("Waiting");
+            bar.set_style(
+                ProgressStyle::with_template("{spinner:.green} {prefix:.bold.green} [{bar:50.cyan/blue}] {bytes}/{total_bytes} • {msg}")
+                    .unwrap()
+                    .progress_chars("#>-"),
+            );
+            let bar = match &self.total {
+                Some(total) => self.multi.insert_before(total, bar),
+                None => self.multi.add(bar),
             };
-            self.progress_bar_map.insert(file_id, pb);
-            self.update_total_file_count();
+            self.bars.insert(id, bar);
         }
     }
-
-    fn update_total_file_count(&self) {
-        if let Some(total_bar) = &self.total_bar {
-            let active_count = self.progress_bar_map.len() as u64;
-            let current_count = (self.finished_count + active_count).min(self.num_files);
-            total_bar.set_message(format!("{}/{}", current_count, self.num_files));
-        }
-    }
-
-    fn update_total_bytes(
+    pub fn set_stage(
         &mut self,
-        file_id: u64,
-        new_pos: u64,
+        stage: FileStage,
     ) {
-        self.file_positions.insert(file_id, new_pos);
-        if let Some(total_bar) = &self.total_bar {
-            let transferred = self.file_positions.values().copied().sum::<u64>();
-            total_bar.set_position(transferred.min(self.total_size));
-        }
-    }
-
-    fn advance_total(&mut self) {
-        self.ensure_total_bar();
-        self.finished_count += 1;
-        self.update_total_file_count();
-    }
-
-    fn finish_total_if_done(&mut self) {
-        if self.finished_count != self.num_files {
+        if self.files.get(&stage.file_id).is_none_or(|f| f.terminal) {
             return;
         }
-        if let Some(total_bar) = self.total_bar.take() {
-            let summary = format!(
-                "  \x1b[1;32m{}\x1b[0m [\x1b[36m{}\x1b[0m] {} • in {:#} • {}/{}",
-                format!("{:<width$}", "Total", width = self.max_file_name_len),
-                "#".repeat(50),
-                HumanBytes(self.total_size),
-                HumanDuration(total_bar.elapsed()),
-                self.finished_count,
-                self.num_files,
-            );
-            total_bar.finish_and_clear();
-            let _ = self.multi.println("  ------------------------");
-            let _ = self.multi.println(summary);
+        self.ensure_bar(stage.file_id);
+        if stage.phase == TransferPhase::Transferring {
+            self.transfer_started.get_or_insert_with(Instant::now);
+            if let Some(file) = self.files.get_mut(&stage.file_id) {
+                self.processed = self.processed.saturating_sub(file.position).saturating_add(stage.position);
+                file.position = stage.position;
+                file.baseline = stage.position;
+                file.started = Some(Instant::now());
+            }
+        } else if stage.phase == TransferPhase::Saving {
+            self.set_position(stage.file_id, stage.position);
         }
+        if let Some(bar) = self.bars.get(&stage.file_id) {
+            bar.set_position(stage.position);
+            bar.set_message(match stage.phase {
+                TransferPhase::Preparing => "Preparing file",
+                TransferPhase::Waiting => "Waiting for receiver",
+                TransferPhase::Transferring => "Transferring • ETA —",
+                TransferPhase::Saving => "Saving at receiver",
+            });
+            bar.enable_steady_tick(REFRESH);
+        }
+        self.update_total();
     }
-
     pub fn set_position(
         &mut self,
-        file_id: u64,
-        pos: u64,
+        id: u64,
+        position: u64,
     ) {
-        let now = Instant::now();
-        if self.last_progress_draw.get(&file_id).is_some_and(|last_draw| now.duration_since(*last_draw) < PROGRESS_REFRESH_INTERVAL) {
-            return;
-        }
-        self.last_progress_draw.insert(file_id, now);
-
-        self.ensure_bar(file_id);
-        if let Some(progress_bar) = self.progress_bar_map.get(&file_id) {
-            if progress_bar.position() == 0 {
-                progress_bar.reset();
+        self.ensure_bar(id);
+        if let Some(file) = self.files.get_mut(&id) {
+            if file.terminal {
+                return;
             }
-            progress_bar.set_position(pos);
+            let position = position.min(file.size);
+            self.transferred += position.saturating_sub(file.position);
+            self.processed = self.processed.saturating_sub(file.position).saturating_add(position);
+            file.position = position;
+            if let Some(bar) = self.bars.get(&id) {
+                bar.set_position(position);
+                let elapsed = file.started.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
+                let bytes = position.saturating_sub(file.baseline);
+                let speed = if elapsed > 0.0 {
+                    bytes as f64 / elapsed
+                } else {
+                    0.0
+                };
+                let eta = if elapsed >= 0.2 && speed > 0.0 {
+                    format!(
+                        "{:#}",
+                        HumanDuration(Duration::from_secs_f64(
+                            ((file.size - position) as f64 / speed).min(315360000.0)
+                        ))
+                    )
+                } else {
+                    "—".into()
+                };
+                bar.set_message(format!("{}/s • ETA {eta}", HumanBytes(speed as u64)));
+            }
         }
-        self.update_total_bytes(file_id, pos);
-        if let Some(total_bar) = &self.total_bar {
-            total_bar.force_draw();
-        } else if let Some(progress_bar) = self.progress_bar_map.get(&file_id) {
-            progress_bar.force_draw();
+        self.update_total();
+    }
+    fn update_total(&self) {
+        if let Some(total) = &self.total {
+            let remaining = self.total_size.saturating_sub(self.processed);
+            let elapsed = self.transfer_started.map(|start| start.elapsed().as_secs_f64()).unwrap_or(0.0);
+            // Only bytes sent during this run contribute to throughput. Skipped
+            // files and existing resume data reduce the remaining work, not time.
+            let eta = if self.finished == self.num_files {
+                "0s".to_owned()
+            } else if remaining > 0 && elapsed >= 0.2 && self.transferred > 0 {
+                let seconds = remaining as f64 * elapsed / self.transferred as f64;
+                format!("{:#}", HumanDuration(Duration::from_secs_f64(seconds.min(315360000.0))))
+            } else {
+                "—".to_owned()
+            };
+            total.set_position(self.processed.min(self.total_size));
+            total.set_message(format!(
+                "{}/{} entries • {} transferred • ETA {}",
+                self.finished,
+                self.num_files,
+                HumanBytes(self.transferred),
+                eta,
+            ));
         }
     }
-
     pub fn finish(
         &mut self,
-        file_id: u64,
+        id: u64,
     ) {
-        self.last_progress_draw.remove(&file_id);
-        self.ensure_bar(file_id);
-        if let Some(progress_bar) = self.progress_bar_map.remove(&file_id) {
-            let summary = format!(
-                "  \x1b[1;32m{}\x1b[0m [\x1b[36m{}\x1b[0m] {} • in {:#}",
-                progress_bar.prefix(),
-                "#".repeat(50),
-                HumanBytes(progress_bar.length().unwrap_or(0)),
-                HumanDuration(progress_bar.elapsed()),
-            );
-            progress_bar.finish_and_clear();
-            let _ = self.multi.println(summary);
+        if self.files.get(&id).is_none_or(|f| f.terminal) {
+            return;
         }
-        let file_size = self.file_info.get(&file_id).map(|(_, size)| *size).unwrap_or(0);
-        self.update_total_bytes(file_id, file_size);
-        self.advance_total();
-        self.finish_total_if_done();
+        let size = self.files[&id].size;
+        self.set_position(id, size);
+        self.complete(id, "Succeeded");
     }
-
     pub fn skip(
         &mut self,
-        file_id: u64,
+        id: u64,
     ) {
-        self.last_progress_draw.remove(&file_id);
-        if let Some((name, _)) = self.file_info.get(&file_id) {
-            let _ = self.multi.println(format!("skip '{}'", name));
+        if let Some(file) = self.files.get_mut(&id) {
+            if file.terminal {
+                return;
+            }
+            self.processed += file.size.saturating_sub(file.position);
+            file.position = file.size;
         }
-        if let Some(progress_bar) = self.progress_bar_map.remove(&file_id) {
-            progress_bar.finish_and_clear();
-        }
-        let file_size = self.file_info.get(&file_id).map(|(_, size)| *size).unwrap_or(0);
-        self.update_total_bytes(file_id, file_size);
-        self.advance_total();
-        self.finish_total_if_done();
+        self.complete(id, "Skipped");
     }
-
+    fn complete(
+        &mut self,
+        id: u64,
+        label: &str,
+    ) {
+        if let Some(file) = self.files.get_mut(&id) {
+            if file.terminal {
+                return;
+            }
+            file.terminal = true;
+            self.finished += 1;
+            let text = if label == "Succeeded" {
+                format!(
+                    "  \x1b[1;32m{:<width$}\x1b[0m [\x1b[36m{}\x1b[0m] {} • in {:#}",
+                    truncate(&file.name, 48),
+                    "#".repeat(50),
+                    HumanBytes(file.size),
+                    HumanDuration(file.started.map(|time| time.elapsed()).unwrap_or_default()),
+                    width = self.name_width,
+                )
+            } else {
+                format!("{label}: {} ({})", file.name, HumanBytes(file.size))
+            };
+            if let Some(bar) = self.bars.remove(&id) {
+                bar.finish_and_clear();
+            }
+            self.println(&text);
+        }
+        self.update_total();
+        if self.finished == self.num_files {
+            if let Some(total) = self.total.take() {
+                let summary = format!(
+                    "  \x1b[1;32m{:<width$}\x1b[0m [\x1b[36m{}\x1b[0m] {} transferred • in {:#} • {}/{} entries",
+                    "Total",
+                    "#".repeat(50),
+                    HumanBytes(self.transferred),
+                    HumanDuration(total.elapsed()),
+                    self.finished,
+                    self.num_files,
+                    width = self.name_width,
+                );
+                total.finish_and_clear();
+                self.println("  ------------------------");
+                self.println(&summary);
+            }
+        }
+    }
     pub fn finish_with_message(
         &mut self,
-        file_id: u64,
+        id: u64,
         msg: impl Into<Cow<'static, str>>,
     ) {
-        self.ensure_bar(file_id);
-        if let Some(progress_bar) = self.progress_bar_map.get(&file_id) {
-            progress_bar.finish_with_message(msg);
-        }
+        self.complete(id, &msg.into());
     }
-
-    pub fn transfer_mode_label(relay_type: RelayType) -> &'static str {
-        match relay_type {
+    pub fn transfer_mode_label(relay: RelayType) -> &'static str {
+        match relay {
             RelayType::Local => "LAN",
-            RelayType::Public | RelayType::Specify => "Relay",
+            _ => "Relay",
         }
     }
-
     pub fn println(
         &self,
         msg: &str,
     ) {
-        // Keep status lines separate from stdout prompts, even before any bars exist.
         self.multi.suspend(|| println!("{msg}"));
+    }
+}
+fn truncate(
+    value: &str,
+    limit: usize,
+) -> String {
+    if value.chars().count() <= limit {
+        value.to_owned()
+    } else {
+        format!("{}…", value.chars().take(limit - 1).collect::<String>())
     }
 }

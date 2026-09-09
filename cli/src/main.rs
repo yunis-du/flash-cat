@@ -155,11 +155,12 @@ async fn send(send_cmd: SendCmd) -> Result<()> {
         Ok(())
     };
 
-    tokio::try_join!(send_task, signals_task)?;
+    let result = tokio::try_join!(send_task, signals_task);
+    send.shutdown();
     // Do not let the runtime drop the relay close request after Ctrl+C. The
     // receiver relies on that handshake to leave its receive loop promptly.
     send.shutdown_complete().await;
-    Ok(())
+    result.map(|_| ())
 }
 
 #[tokio::main]
@@ -210,10 +211,10 @@ async fn recv(recv_cmd: RecvCmd) -> Result<()> {
         Ok(())
     };
 
-    tokio::try_join!(receive_task, signals_task)?;
-    // Ensure that the channel is closed
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    Ok(())
+    let result = tokio::try_join!(receive_task, signals_task);
+    receive.shutdown();
+    receive.shutdown_complete().await;
+    result.map(|_| ())
 }
 
 #[tokio::main]
@@ -280,7 +281,7 @@ fn main() -> ExitCode {
                 return match send(send_cmd) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {
-                        println!("{err:?}");
+                        eprintln!("{err:?}");
                         ExitCode::FAILURE
                     }
                 };
@@ -289,7 +290,7 @@ fn main() -> ExitCode {
                 return match recv(recv_cmd) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {
-                        println!("{err:?}");
+                        eprintln!("{err:?}");
                         ExitCode::FAILURE
                     }
                 };
@@ -300,7 +301,7 @@ fn main() -> ExitCode {
                 return match start_relay(addr, relay_cmd.external_ip, relay_cmd.forward) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {
-                        println!("{err:?}");
+                        eprintln!("{err:?}");
                         ExitCode::FAILURE
                     }
                 };
@@ -309,7 +310,7 @@ fn main() -> ExitCode {
                 return match update() {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {
-                        println!("{err:?}");
+                        eprintln!("{err:?}");
                         ExitCode::FAILURE
                     }
                 };

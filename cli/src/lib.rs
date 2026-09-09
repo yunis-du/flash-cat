@@ -1,4 +1,5 @@
 pub mod progress;
+mod prompt;
 pub mod receive;
 pub mod send;
 pub mod update;

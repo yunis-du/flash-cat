@@ -2173,6 +2173,7 @@ dependencies = [
  "built",
  "bytes",
  "clap",
+ "console",
  "dashmap",
  "flash_cat_common",
  "flash_cat_core",

@@ -1,6 +1,7 @@
-use std::{env, path::PathBuf, process, sync::Arc};
+use flash_cat_core::{FileStatus, TransferResults};
+use std::{env, path::PathBuf, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use tokio_stream::StreamExt;
 
 use flash_cat_common::{Shutdown, proto::ClientType, utils::gen_share_code};
@@ -34,7 +35,30 @@ impl Send {
             })
             .collect::<Vec<_>>();
         let share_code = gen_share_code();
-        let sender = FlashCatSender::new(share_code.clone(), relay.clone(), files, zip, ClientType::Cli, lan_broadcast).await?;
+        let scanning = indicatif::ProgressBar::new_spinner();
+        scanning.set_style(indicatif::ProgressStyle::with_template("{spinner} {msg}")?);
+        scanning.enable_steady_tick(std::time::Duration::from_millis(100));
+        scanning.set_message("Scanning files… (Ctrl+C to cancel)");
+        let scan_progress = scanning.clone();
+        let result = FlashCatSender::new_with_scan_progress(
+            share_code.clone(),
+            relay.clone(),
+            files,
+            zip,
+            ClientType::Cli,
+            lan_broadcast,
+            move |progress| {
+                scan_progress.set_message(format!(
+                    "Scanning: {} files, {} folders, {} • Ctrl+C to cancel",
+                    progress.files,
+                    progress.folders,
+                    indicatif::HumanBytes(progress.bytes)
+                ));
+            },
+        )
+        .await;
+        scanning.finish_and_clear();
+        let sender = result?;
         Ok(Self {
             share_code,
             sender,
@@ -44,6 +68,15 @@ impl Send {
     }
 
     pub async fn run(&self) -> Result<()> {
+        let result = tokio::select! {
+            result = self.run_inner() => result,
+            _ = self.shutdown.wait() => Err(anyhow::anyhow!("Transfer cancelled")),
+        };
+        self.shutdown();
+        result
+    }
+
+    async fn run_inner(&self) -> Result<()> {
         let file_collector = self.sender.get_file_collector();
         if file_collector.num_files == 1 {
             print!("Sending {} file ", file_collector.num_files);
@@ -60,8 +93,10 @@ impl Send {
         }
         println!("({})", file_collector.total_size_to_human_readable());
 
+        let mut results = TransferResults::default();
+        let mut completed = false;
         let mut progress = Progress::new(
-            file_collector.num_files,
+            file_collector.files.len() as u64,
             file_collector.max_file_name_length,
             file_collector.total_size,
         );
@@ -106,42 +141,47 @@ impl Send {
                             }
                             SenderInteractionMessage::Error(e) => {
                                 connecting.finish_and_clear();
-                                progress.println(&format!("An error occurred: {}", e));
-                                self.shutdown();
+                                bail!("{e}; {}", results.summary(file_collector.files.len() as u64));
                             }
                             SenderInteractionMessage::ReceiverReject => {
-                                progress.println("Receiver reject this share. exit...");
-                                self.shutdown();
+                                bail!("Receiver rejected the transfer");
                             }
                             SenderInteractionMessage::RelayFailed((relay_type, error)) => {
                                 connecting.finish_and_clear();
                                 if RelayType::Local.eq(&relay_type) || RelayType::Specify.eq(&relay_type) {
-                                    process::exit(1);
+                                    bail!("Could not connect to {} relay: {error}", relay_type.to_string());
                                 } else {
                                     progress.println(&format!("connect to {} relay failed: {}", relay_type.to_string(), error));
                                 }
                             }
-                            SenderInteractionMessage::ContinueFile(file_id) => {
-                                progress.skip(file_id);
-                            }
+                            SenderInteractionMessage::FileStage(stage) => progress.set_stage(stage),
                             SenderInteractionMessage::FileProgress(file_progress) => {
                                 progress.set_position(file_progress.file_id, file_progress.position);
                             }
-                            SenderInteractionMessage::FileProgressFinish(file_id) => {
-                                progress.finish(file_id);
+                            SenderInteractionMessage::FileResult(result) => {
+                                if results.record(result.clone()) {
+                                    match result.status() {
+                                        FileStatus::Success => progress.finish(result.file_id),
+                                        FileStatus::Skipped => progress.skip(result.file_id),
+                                        FileStatus::Failed => progress.finish_with_message(result.file_id, format!("Failed: {}", result.error)),
+                                    }
+                                }
                             }
                             SenderInteractionMessage::OtherClose => {
-                                progress.println("The receive end is interrupted. exit...");
-                                self.shutdown();
+                                bail!("Receiver disconnected: {}", results.summary(file_collector.files.len() as u64));
                             }
                             SenderInteractionMessage::ReconnectFailed(error) => {
-                                progress.println(&format!("Reconnect failed: {error}. exit..."));
-                                self.shutdown();
+                                bail!(
+                                    "Reconnect failed: {error}; {}",
+                                    results.summary(file_collector.files.len() as u64)
+                                );
                             }
                             SenderInteractionMessage::SendDone => {
                                 // progress.println("Send files done. waiting for the receiver to receive finish...");
                             }
                             SenderInteractionMessage::Completed => {
+                                completed = true;
+                                progress.println(&results.summary(file_collector.files.len() as u64));
                                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                                 self.shutdown();
                             }
@@ -159,6 +199,9 @@ impl Send {
         }
 
         connecting.finish_and_clear();
+        if !completed || results.failed > 0 || results.remaining(file_collector.files.len() as u64) > 0 {
+            bail!("Transfer incomplete: {}", results.summary(file_collector.files.len() as u64));
+        }
         Ok(())
     }
 

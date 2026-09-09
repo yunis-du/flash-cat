@@ -22,6 +22,7 @@ flash_cat_relay.workspace = true
 anyhow.workspace = true
 bytes.workspace = true
 clap.workspace = true
+console.workspace = true
 dashmap.workspace = true
 log.workspace = true
 tokio.workspace = true
