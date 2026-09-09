@@ -1,3 +1,6 @@
+use flash_cat_core::{FileStatus, TransferResults};
+use futures::SinkExt;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use flash_cat_common::{consts::PUBLIC_RELAY, proto::ClientType};
@@ -19,7 +22,7 @@ use tokio_stream::StreamExt;
 use crate::{
     assets::CustomIconName,
     components::{Card, ProgressBar},
-    helpers::{i18n_common, i18n_receive},
+    helpers::{i18n_common, i18n_receive, spawn_transfer},
     state::FlashCatAppGlobalStore,
 };
 
@@ -55,11 +58,24 @@ pub struct ReceiveView {
     receive_but_hover: bool,
     flash_cat_receiver: Option<Arc<FlashCatReceiver>>,
     progress_bars: Vec<ProgressBar>,
+    progress_index: HashMap<u64, usize>,
+    page: usize,
     notification: NotificationType,
     num_files: u64,
+    generation: u64,
+    results: TransferResults,
+    total_entries: u64,
 }
 
 impl ReceiveView {
+    fn progress_mut(
+        &mut self,
+        file_id: u64,
+    ) -> Option<&mut ProgressBar> {
+        let index = *self.progress_index.get(&file_id)?;
+        self.progress_bars.get_mut(index)
+    }
+
     pub fn new(
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -73,8 +89,13 @@ impl ReceiveView {
             receive_but_hover: false,
             flash_cat_receiver: None,
             progress_bars: vec![],
+            progress_index: HashMap::new(),
+            page: 0,
             notification: NotificationType::None,
             num_files: 0,
+            generation: 0,
+            results: TransferResults::default(),
+            total_entries: 0,
         }
     }
 
@@ -84,11 +105,8 @@ impl ReceiveView {
     ) {
         if let Some(fcr) = &self.flash_cat_receiver {
             let fcr = fcr.clone();
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                rt.block_on(async move {
-                    let _ = fcr.send_confirm(confirm).await;
-                });
+            let _ = spawn_transfer(async move {
+                let _ = fcr.send_confirm(confirm).await;
             });
         }
     }
@@ -130,11 +148,14 @@ impl Render for ReceiveView {
                 .child(Button::new("lan_tooltip").icon(CustomIconName::Help).cursor_pointer().ghost().small().tooltip(i18n_receive(cx, "lan_tooltip")))
         };
 
+        let pages = self.progress_bars.len().div_ceil(64).max(1);
+        let page = self.page.min(pages - 1);
+
         let receive_card = {
             let placeholder = div().flex().size_full().justify_center().items_center().child(Label::new(i18n_receive(cx, "placeholder")));
 
             let mut items = vec![];
-            for progress_bar in &self.progress_bars {
+            for progress_bar in self.progress_bars.iter().skip(page * 64).take(64) {
                 items.push(div().p_2().mb_1().bg(cx.theme().list_hover).rounded_md().child(progress_bar.clone().into_element()));
             }
 
@@ -151,7 +172,11 @@ impl Render for ReceiveView {
 
         let receive_button = {
             let label = match &self.receive_state {
-                ReceiveState::Idle => Some(i18n_receive(cx, "receive")),
+                ReceiveState::Idle => Some(if matches!(self.notification, NotificationType::Error(_)) {
+                    i18n_common(cx, "retry")
+                } else {
+                    i18n_receive(cx, "receive")
+                }),
                 ReceiveState::Connecting | ReceiveState::AwaitingConfirm => {
                     if self.receive_but_hover {
                         Some(i18n_receive(cx, "cancel_receive"))
@@ -201,6 +226,16 @@ impl Render for ReceiveView {
                     if share_code.is_empty() {
                         return;
                     }
+                    view.generation += 1;
+                    let generation = view.generation;
+                    view.results = TransferResults::default();
+                    if let Some(receiver) = view.flash_cat_receiver.take() {
+                        receiver.shutdown();
+                    }
+                    view.progress_bars.clear();
+                    view.progress_index.clear();
+                    view.page = 0;
+                    view.notification = NotificationType::None;
                     view.receive_state = ReceiveState::Connecting;
                     let relay_addr = cx.global::<FlashCatAppGlobalStore>().read(cx).relay_address();
                     let save_path = cx.global::<FlashCatAppGlobalStore>().read(cx).save_path();
@@ -221,39 +256,60 @@ impl Render for ReceiveView {
 
                             cx.spawn(async move |view, cx| {
                                 // Create a channel to receive messages from tokio runtime
-                                let (tx, mut rx) = futures::channel::mpsc::unbounded::<ReceiverInteractionMessage>();
+                                let (mut tx, mut rx) = futures::channel::mpsc::channel::<ReceiverInteractionMessage>(128);
 
-                                let fcr_for_thread = view.update(cx, |view, _| view.flash_cat_receiver.clone()).ok().flatten();
+                                let fcr_for_thread = view
+                                    .update(cx, |view, _| {
+                                        (view.generation == generation).then(|| view.flash_cat_receiver.clone()).flatten()
+                                    })
+                                    .ok()
+                                    .flatten();
                                 if let Some(fcr) = fcr_for_thread {
-                                    // Spawn a thread with tokio runtime to run the receiver
-                                    std::thread::spawn(move || {
-                                        let rt = tokio::runtime::Runtime::new().unwrap();
-                                        rt.block_on(async move {
-                                            match fcr.start().await {
-                                                Ok(mut stream) => {
-                                                    while let Some(msg) = stream.next().await {
-                                                        if tx.unbounded_send(msg).is_err() {
-                                                            break;
-                                                        }
+                                    let mut errors = tx.clone();
+                                    let result = spawn_transfer(async move {
+                                        match fcr.clone().start().await {
+                                            Ok(mut stream) => {
+                                                while let Some(msg) = stream.next().await {
+                                                    let terminal = matches!(
+                                                        &msg,
+                                                        ReceiverInteractionMessage::ReceiveDone
+                                                            | ReceiverInteractionMessage::Error(_)
+                                                            | ReceiverInteractionMessage::OtherClose
+                                                            | ReceiverInteractionMessage::ReconnectFailed(_)
+                                                    );
+                                                    if tx.send(msg).await.is_err() || terminal {
+                                                        break;
                                                     }
                                                 }
-                                                Err(_e) => {
-                                                    // Handle start error
-                                                }
                                             }
-                                        });
+                                            Err(error) => {
+                                                let _ = tx.send(ReceiverInteractionMessage::Error(error.to_string())).await;
+                                            }
+                                        }
+                                        fcr.shutdown();
                                     });
+                                    if let Err(error) = result {
+                                        let _ = errors.send(ReceiverInteractionMessage::Error(error.to_string())).await;
+                                    }
+                                    drop(errors);
 
                                     // Listen for messages from the tokio runtime
                                     while let Some(msg) = rx.next().await {
                                         let should_break = view
                                             .update(cx, |view, cx| {
+                                                if view.generation != generation {
+                                                    return true;
+                                                }
+                                                cx.notify();
                                                 match msg {
                                                     ReceiverInteractionMessage::TransferMode(_) => {}
                                                     ReceiverInteractionMessage::Message(msg) => {
                                                         view.notification = NotificationType::Message(msg);
                                                     }
                                                     ReceiverInteractionMessage::Error(e) => {
+                                                        if let Some(receiver) = view.flash_cat_receiver.take() {
+                                                            receiver.shutdown();
+                                                        }
                                                         let locale = cx.global::<FlashCatAppGlobalStore>().read(cx).locale();
                                                         if e.contains("NotFound") {
                                                             view.notification =
@@ -267,11 +323,15 @@ impl Render for ReceiveView {
                                                     }
                                                     ReceiverInteractionMessage::SendFilesRequest(req) => {
                                                         view.num_files = req.num_files;
+                                                        view.total_entries = req.num_entries;
                                                         view.notification = NotificationType::ConfirmReceive {
                                                             file_count: req.num_files,
                                                             folder_count: req.num_folders,
                                                         };
                                                         view.receive_state = ReceiveState::AwaitingConfirm;
+                                                    }
+                                                    ReceiverInteractionMessage::FileRenamed((_, path)) => {
+                                                        view.notification = NotificationType::Message(format!("Saving as {path}"));
                                                     }
                                                     ReceiverInteractionMessage::FileDuplication(dup) => {
                                                         view.notification = NotificationType::ConfirmFileDuplicate {
@@ -280,35 +340,48 @@ impl Render for ReceiveView {
                                                         };
                                                     }
                                                     ReceiverInteractionMessage::RecvNewFile(new_file) => {
-                                                        view.progress_bars.push(ProgressBar::new(new_file.file_id, new_file.filename, new_file.size));
+                                                        if !view.progress_index.contains_key(&new_file.file_id) {
+                                                            view.progress_index.insert(new_file.file_id, view.progress_bars.len());
+                                                            view.progress_bars.push(ProgressBar::new(new_file.file_id, new_file.filename, new_file.size));
+                                                        }
                                                         if view.receive_state != ReceiveState::Receiving {
                                                             view.receive_state = ReceiveState::Receiving;
                                                             view.notification = NotificationType::None;
                                                         }
                                                     }
                                                     ReceiverInteractionMessage::BreakPoint(bp) => {
-                                                        if let Some(pb) = view.progress_bars.iter_mut().find(|pb| pb.get_file_id() == bp.file_id) {
+                                                        if let Some(pb) = view.progress_mut(bp.file_id) {
                                                             pb.set_progress(bp.position);
                                                         }
                                                         view.send_confirm(ReceiverConfirm::BreakPointConfirm((true, bp.file_id, bp.position)));
                                                     }
+                                                    ReceiverInteractionMessage::FileStage(stage) => {
+                                                        if let Some(pb) = view.progress_mut(stage.file_id) {
+                                                            pb.set_stage(stage.phase, stage.position);
+                                                        }
+                                                    }
                                                     ReceiverInteractionMessage::FileProgress(progress) => {
-                                                        if let Some(pb) = view.progress_bars.iter_mut().find(|pb| pb.get_file_id() == progress.file_id) {
+                                                        if let Some(pb) = view.progress_mut(progress.file_id) {
                                                             pb.set_progress(progress.position);
                                                         }
                                                     }
-                                                    ReceiverInteractionMessage::FileProgressFinish(file_id) => {
-                                                        if let Some(pb) = view.progress_bars.iter_mut().find(|pb| pb.get_file_id() == file_id) {
-                                                            pb.finish();
+                                                    ReceiverInteractionMessage::FileResult(result) => {
+                                                        if view.results.record(result.clone()) {
+                                                            if let Some(pb) = view.progress_mut(result.file_id) {
+                                                                match result.status() {
+                                                                    FileStatus::Success => pb.finish(),
+                                                                    FileStatus::Skipped => pb.skip(),
+                                                                    FileStatus::Failed => pb.fail(result.error.clone()),
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                     ReceiverInteractionMessage::OtherClose => {
                                                         if let Some(receiver) = view.flash_cat_receiver.take() {
                                                             receiver.shutdown();
                                                         }
-                                                        view.notification = NotificationType::Message("Sender disconnected".to_string());
+                                                        view.notification = NotificationType::Error(i18n_common(cx, "sender_disconnected").to_string());
                                                         view.receive_state = ReceiveState::Idle;
-                                                        view.progress_bars.clear();
                                                         return true;
                                                     }
                                                     ReceiverInteractionMessage::ReconnectFailed(error) => {
@@ -317,7 +390,6 @@ impl Render for ReceiveView {
                                                         }
                                                         view.notification = NotificationType::Error(error);
                                                         view.receive_state = ReceiveState::Idle;
-                                                        view.progress_bars.clear();
                                                         return true;
                                                     }
                                                     ReceiverInteractionMessage::ReceiveDone => {
@@ -335,6 +407,21 @@ impl Render for ReceiveView {
                                             break;
                                         }
                                     }
+                                    let _ = view.update(cx, |view, cx| {
+                                        if view.generation == generation
+                                            && matches!(
+                                                view.receive_state,
+                                                ReceiveState::Connecting | ReceiveState::AwaitingConfirm | ReceiveState::Receiving
+                                            )
+                                        {
+                                            if let Some(receiver) = view.flash_cat_receiver.take() {
+                                                receiver.shutdown();
+                                            }
+                                            view.notification = NotificationType::Error(i18n_common(cx, "transfer_stopped").to_string());
+                                            view.receive_state = ReceiveState::Idle;
+                                            cx.notify();
+                                        }
+                                    });
                                 }
                             })
                             .detach();
@@ -347,6 +434,7 @@ impl Render for ReceiveView {
                     }
                 }
                 ReceiveState::Connecting | ReceiveState::AwaitingConfirm | ReceiveState::Receiving => {
+                    view.generation += 1;
                     // Cancel receive
                     if let Some(fcr) = view.flash_cat_receiver.take() {
                         fcr.shutdown();
@@ -354,10 +442,16 @@ impl Render for ReceiveView {
                     view.receive_state = ReceiveState::Idle;
                     view.notification = NotificationType::None;
                     view.progress_bars.clear();
+                    view.progress_index.clear();
+                    view.page = 0;
                 }
                 ReceiveState::ReceiveDone => {
                     // Reset after completion
+                    view.total_entries = 0;
+                    view.results = TransferResults::default();
                     view.progress_bars.clear();
+                    view.progress_index.clear();
+                    view.page = 0;
                     view.flash_cat_receiver = None;
                     view.share_code_state.update(cx, |state, cx| {
                         state.set_value("".to_string(), window, cx);
@@ -426,7 +520,7 @@ impl Render for ReceiveView {
                     .child(
                         Button::new("dup_no").small().ghost().label("No").cursor_pointer().on_click(cx.listener(move |view, _, _, _| {
                             view.send_confirm(ReceiverConfirm::FileConfirm((false, file_id)));
-                            if let Some(pb) = view.progress_bars.iter_mut().find(|pb| pb.get_file_id() == file_id) {
+                            if let Some(pb) = view.progress_mut(file_id) {
                                 pb.skip();
                             }
                             view.notification = NotificationType::None;
@@ -454,6 +548,53 @@ impl Render for ReceiveView {
             }
         };
 
-        v_flex().id("receive-view").m_2().gap_1().child(share_code_input).child(lan_checkbox).child(receive_card).child(receive_button).child(notification_view)
+        v_flex()
+            .id("receive-view")
+            .m_2()
+            .gap_1()
+            .child(share_code_input)
+            .child(lan_checkbox)
+            .child(receive_card)
+            .when(pages > 1, |this| {
+                this.child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("previous-page").small().label(i18n_common(cx, "previous")).disabled(page == 0).on_click(cx.listener(
+                                move |view, _, _, cx| {
+                                    view.page = page.saturating_sub(1);
+                                    cx.notify();
+                                },
+                            )),
+                        )
+                        .child(Label::new(format!("{} / {}", page + 1, pages)).text_sm())
+                        .child(
+                            Button::new("next-page").small().label(i18n_common(cx, "next")).disabled(page + 1 >= pages).on_click(cx.listener(
+                                move |view, _, _, cx| {
+                                    view.page = (page + 1).min(pages - 1);
+                                    cx.notify();
+                                },
+                            )),
+                        ),
+                )
+            })
+            .child(receive_button)
+            .child(notification_view)
+            .when(self.total_entries > 0, |this| {
+                this.child(
+                    Label::new(format!(
+                        "{} {} · {} {} · {} {} · {} {}",
+                        self.results.succeeded,
+                        i18n_common(cx, "succeeded"),
+                        self.results.skipped,
+                        i18n_common(cx, "skip"),
+                        self.results.failed,
+                        i18n_common(cx, "failed"),
+                        self.results.remaining(self.total_entries),
+                        i18n_common(cx, "unfinished")
+                    ))
+                    .text_sm(),
+                )
+            })
     }
 }
