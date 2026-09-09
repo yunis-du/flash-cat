@@ -1,3 +1,6 @@
+pub mod identity;
+pub mod receive_file;
+
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::{
@@ -7,7 +10,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 #[cfg(feature = "progress")]
 use indicatif::{MultiProgress, ProgressBar, ProgressState, ProgressStyle};
 use walkdir::WalkDir;
@@ -27,6 +30,7 @@ pub struct FileInfo {
     pub mode: u32,
     pub size: u64,
     pub empty_dir: bool,
+    pub source_identity: String,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -39,17 +43,6 @@ pub struct FileCollector {
 }
 
 impl FileCollector {
-    fn acc(
-        &mut self,
-        mut pc: Self,
-    ) {
-        self.total_size += pc.total_size;
-        self.num_files += pc.num_files;
-        self.num_folders += pc.num_folders;
-        self.calc_max_file_name_length(pc.max_file_name_length);
-        self.files.append(&mut pc.files);
-    }
-
     fn add_total_size(
         &mut self,
         total_size: u64,
@@ -92,73 +85,119 @@ impl FileCollector {
     }
 }
 
-/// Collect how many files exist in the paths, how many folders, and the total size.
-pub fn collect_files<P: AsRef<Path>>(paths: &[P]) -> FileCollector {
-    let mut file_id = 1;
-    paths
-        .into_iter()
-        .map(|path| {
-            WalkDir::new(path)
-                .follow_links(true)
-                .into_iter()
-                .filter_map(|entry| entry.ok())
-                .filter_map(|entry| match entry.metadata() {
-                    Ok(metadata) => Some((metadata, entry.path().to_owned(), path.as_ref().to_owned())),
-                    Err(_) => None,
-                })
-                .fold(FileCollector::default(), |mut fc: FileCollector, (metadata, path, root)| {
-                    let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-                    let mut root_clone = root.clone();
-                    root_clone.pop();
-                    let relative_path = path.strip_prefix(root_clone.as_path()).unwrap();
-                    if metadata.is_file() {
-                        let file_name_legnth = file_name.len();
-                        let file_size = metadata.len();
-                        let file_info = FileInfo {
-                            file_id,
-                            name: file_name,
-                            access_path: path.to_string_lossy().to_string(),
-                            relative_path: relative_path.to_string_lossy().to_string(),
-                            #[cfg(unix)]
-                            mode: metadata.mode(),
-                            size: file_size,
-                            empty_dir: false,
-                        };
-                        file_id += 1;
-                        fc.add_file(file_info);
-                        fc.calc_max_file_name_length(file_name_legnth);
-                        fc.add_total_size(file_size);
-                        fc.count_num_files();
-                        fc
-                    } else if metadata.is_dir() {
-                        if let Ok(directory) = path.as_path().read_dir() {
-                            if directory.count() == 0 {
-                                // empty directory
-                                let file_info = FileInfo {
-                                    file_id,
-                                    name: file_name,
-                                    access_path: path.to_string_lossy().to_string(),
-                                    relative_path: relative_path.to_string_lossy().to_string(),
-                                    #[cfg(unix)]
-                                    mode: metadata.mode(),
-                                    size: 0,
-                                    empty_dir: true,
-                                };
-                                file_id += 1;
-                                fc.add_file(file_info);
-                            }
-                        }
-                        fc.count_num_folders();
-                        fc
+#[derive(Debug, Clone, Default)]
+pub struct ScanProgress {
+    pub files: u64,
+    pub folders: u64,
+    pub bytes: u64,
+}
+
+/// Scan fails explicitly on inaccessible entries; a partial selection must never
+/// silently become a successful transfer. Callers may cancel between entries.
+pub fn collect_files<P: AsRef<Path>>(paths: &[P]) -> Result<FileCollector> {
+    collect_files_with_progress(paths, &Shutdown::new(), |_| {})
+}
+
+pub fn collect_files_with_progress<P: AsRef<Path>>(
+    paths: &[P],
+    shutdown: &Shutdown,
+    mut report: impl FnMut(ScanProgress),
+) -> Result<FileCollector> {
+    let mut collector = FileCollector::default();
+    let mut seen = std::collections::HashSet::new();
+    let mut last_report = std::time::Instant::now();
+    report(ScanProgress::default());
+    let mut roots = paths
+        .iter()
+        .map(|selected| std::path::absolute(selected.as_ref()).with_context(|| format!("Cannot scan {}", selected.as_ref().display())))
+        .collect::<Result<Vec<_>>>()?;
+    // Prefer the parent selection so a separately selected child keeps its
+    // directory layout and is not accidentally sent under a different root.
+    roots.sort_by_key(|root| root.components().count());
+    let mut scanned_roots = std::collections::HashSet::new();
+    for root in roots {
+        if shutdown.is_terminated() {
+            bail!("File scan cancelled");
+        }
+        if root.ancestors().any(|ancestor| scanned_roots.contains(ancestor)) {
+            continue;
+        }
+        scanned_roots.insert(root.clone());
+        let parent = root.parent().unwrap_or(Path::new("/"));
+        for entry in WalkDir::new(&root).follow_links(true) {
+            if shutdown.is_terminated() {
+                bail!("File scan cancelled");
+            }
+            let entry = entry.with_context(|| format!("Cannot scan {}", root.display()))?;
+            let path = entry.path();
+            // Selecting a folder and a file inside it should only enqueue that path once.
+            if !seen.insert(path.to_path_buf()) {
+                continue;
+            }
+            let metadata = entry.metadata().with_context(|| format!("Cannot inspect {}", path.display()))?;
+            let empty_dir = if metadata.is_dir() {
+                collector.count_num_folders();
+                fs::read_dir(path)
+                    .with_context(|| format!("Cannot read folder {}", path.display()))?
+                    .next()
+                    .transpose()
+                    .with_context(|| format!("Cannot read folder {}", path.display()))?
+                    .is_none()
+            } else {
+                false
+            };
+            if metadata.is_file() || empty_dir {
+                if metadata.is_file() {
+                    File::open(path).with_context(|| format!("Cannot read file {}", path.display()))?;
+                    collector.count_num_files();
+                    collector.add_total_size(metadata.len());
+                }
+                let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                collector.calc_max_file_name_length(name.chars().count());
+                collector.add_file(FileInfo {
+                    file_id: collector.files.len() as u64 + 1,
+                    name,
+                    access_path: path.to_string_lossy().into_owned(),
+                    relative_path: path.strip_prefix(parent)?.to_string_lossy().into_owned(),
+                    #[cfg(unix)]
+                    mode: metadata.mode(),
+                    size: if empty_dir {
+                        0
                     } else {
-                        fc
-                    }
-                })
-        })
-        .fold(FileCollector::default(), |mut fc, cur| {
-            fc.acc(cur);
-            fc
-        })
+                        metadata.len()
+                    },
+                    empty_dir,
+                    source_identity: if empty_dir {
+                        String::new()
+                    } else {
+                        identity::file_identity(&metadata)?
+                    },
+                });
+            } else if !metadata.is_dir() {
+                bail!("Unsupported file type: {}", path.display());
+            }
+            if last_report.elapsed() >= std::time::Duration::from_millis(100) {
+                report(ScanProgress {
+                    files: collector.num_files,
+                    folders: collector.num_folders,
+                    bytes: collector.total_size,
+                });
+                last_report = std::time::Instant::now();
+            }
+        }
+    }
+    if shutdown.is_terminated() {
+        bail!("File scan cancelled");
+    }
+    if collector.files.is_empty() {
+        bail!("No readable files or empty folders were selected");
+    }
+    report(ScanProgress {
+        files: collector.num_files,
+        folders: collector.num_folders,
+        bytes: collector.total_size,
+    });
+    Ok(collector)
 }
 
 /// Check whether the paths exists.
@@ -232,7 +271,11 @@ pub fn zip_folder<P: AsRef<Path>>(
     let (total_size, total_files) = {
         let mut total_size = 0u64;
         let mut total_files = 0u64;
-        for entry in WalkDir::new(&path).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(&path) {
+            if shutdown.is_terminated() {
+                bail!("Folder compression cancelled");
+            }
+            let entry = entry.with_context(|| format!("Cannot scan {}", path.display()))?;
             if entry.path() == output_path {
                 continue;
             }
@@ -276,9 +319,10 @@ pub fn zip_folder<P: AsRef<Path>>(
     #[cfg(feature = "progress")]
     let mut processed_files = 0u64;
 
-    for entry in WalkDir::new(&path).contents_first(true).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(&path).contents_first(true) {
+        let entry = entry.with_context(|| format!("Cannot scan {}", path.display()))?;
         if shutdown.is_terminated() {
-            break;
+            bail!("Folder compression cancelled");
         }
 
         let entry_path = entry.path();
@@ -314,7 +358,17 @@ pub fn zip_folder<P: AsRef<Path>>(
             let mut file = progress_bar.wrap_read(file);
             #[cfg(not(feature = "progress"))]
             let mut file = file;
-            io::copy(&mut file, &mut zip)?;
+            let mut buffer = vec![0; 1024 * 1024];
+            loop {
+                if shutdown.is_terminated() {
+                    bail!("Folder compression cancelled");
+                }
+                let read = io::Read::read(&mut file, &mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                io::Write::write_all(&mut zip, &buffer[..read])?;
+            }
 
             #[cfg(feature = "progress")]
             {

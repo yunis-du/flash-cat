@@ -114,6 +114,7 @@ message SenderUpdate {
 
 // Send request.
 message SendRequest {
+  uint64 num_entries = 6;
   uint64 total_size = 1; // Total size.
   uint64 num_files = 2; // Number of files.
   uint64 num_folders = 3; // Number of folders.
@@ -129,6 +130,7 @@ message NewFileRequest {
   string relative_path = 4; // Relative path.
   uint64 total_size = 5; // Total size.
   bool is_empty_dir = 6; // Whether it is an empty directory.
+  string source_identity = 8; // File size and source modification time; no content hash.
 }
 
 // Break point.
@@ -154,6 +156,7 @@ message ReceiverUpdate {
     Confirm share_confirm = 1; // Share confirm.
     FileConfirm file_confirm = 2; // File confirm.
     ResumeState resume_state = 3; // Resume state after reconnection.
+    FileResult file_result = 5; // Final outcome, after publication or explicit skip.
     uint32 file_request_window = 4; // Negotiated lookahead, sent before share_confirm.
   }
 }
@@ -177,6 +180,7 @@ message BreakPointConfirm {
   uint64 file_id = 1; // File id.
   uint64 position = 2; // Position.
   Confirm confirm = 3; // Confirm.
+  string source_identity = 5; // Source metadata, optionally followed by :sha256:<prefix digest> for verified resume.
 }
 
 // Confirm.
@@ -186,10 +190,17 @@ enum Confirm {
 }
 
 // File result.
-message FileResult {
-  int32 file_id = 1; // File id.
-  int32 status = 2; // The status of file transfer, 0 is success other is failed.
+enum FileStatus {
+  SUCCESS = 0;
+  SKIPPED = 1;
+  FAILED = 2;
 }
+message FileResult {
+  uint64 file_id = 1;
+  FileStatus status = 2;
+  string error = 3;
+}
+
 
 // Resume request sent by sender after reconnection.
 message ResumeRequest {}
@@ -204,4 +215,5 @@ message FileResumeProgress {
   uint64 file_id = 1; // File id.
   uint64 received_bytes = 2; // Number of bytes received.
   bool completed = 3; // Whether the file is fully received.
+  string source_identity = 5; // Source metadata; retains an unverified prefix proof across reconnection.
 }

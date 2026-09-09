@@ -15,6 +15,9 @@ use flash_cat_common::{
 
 mod chunks;
 mod progress;
+mod results;
+pub use flash_cat_common::proto::{FileResult, FileStatus};
+pub use results::TransferResults;
 pub mod receiver;
 pub mod sender;
 
@@ -29,9 +32,9 @@ pub enum SenderInteractionMessage {
     TransferMode(RelayType),
     ReceiverReject,
     RelayFailed((RelayType, String)),
-    ContinueFile(u64),
+    FileStage(FileStage),
     FileProgress(Progress),
-    FileProgressFinish(u64),
+    FileResult(FileResult),
     OtherClose,
     ReconnectFailed(String),
     SendDone,
@@ -45,10 +48,12 @@ pub enum ReceiverInteractionMessage {
     Error(String),
     SendFilesRequest(SendFilesRequest),
     FileDuplication(FileDuplication),
+    FileRenamed((u64, String)),
     RecvNewFile(RecvNewFile),
     BreakPoint(BreakPoint),
+    FileStage(FileStage),
     FileProgress(Progress),
-    FileProgressFinish(u64),
+    FileResult(FileResult),
     OtherClose,
     ReconnectFailed(String),
     ReceiveDone,
@@ -71,6 +76,21 @@ impl RelayType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferPhase {
+    Preparing,
+    Waiting,
+    Transferring,
+    Saving,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileStage {
+    pub file_id: u64,
+    pub phase: TransferPhase,
+    pub position: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct Progress {
     pub file_id: u64,
@@ -80,12 +100,14 @@ pub struct Progress {
 #[derive(Debug, Clone)]
 pub enum ReceiverConfirm {
     ReceiveConfirm(bool),
+    RenameFile(u64),
     FileConfirm((bool, u64)),
     BreakPointConfirm((bool, u64, u64)), // (accept, file_id, start_position)
 }
 
 #[derive(Debug, Clone)]
 pub struct SendFilesRequest {
+    pub num_entries: u64,
     pub total_size: u64,
     pub num_files: u64,
     pub num_folders: u64,

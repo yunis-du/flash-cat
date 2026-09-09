@@ -1,5 +1,6 @@
+use crate::{FileStage, TransferPhase};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     net::SocketAddr,
     path::Path,
     pin::Pin,
@@ -8,6 +9,7 @@ use std::{
 };
 
 use anyhow::{Result, bail};
+use flash_cat_common::utils::fs::identity::{file_identity, prefix_digest};
 use tokio::{signal::ctrl_c, sync::mpsc};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -23,7 +25,7 @@ use flash_cat_common::{
         relay_update::RelayMessage, sender_update::SenderMessage,
     },
     utils::{
-        fs::{FileCollector, FileInfo, collect_files, is_idr, paths_exist, zip_folder},
+        fs::{FileCollector, FileInfo, ScanProgress, collect_files_with_progress, is_idr, paths_exist, zip_folder},
         net::{find_available_port, net_scout::NetScout},
     },
 };
@@ -133,10 +135,22 @@ impl FlashCatSender {
     pub async fn new(
         share_code: String,
         specify_relay: Option<String>,
+        files: Vec<String>,
+        zip_floder: bool,
+        client_type: ClientType,
+        lan_broadcast: bool,
+    ) -> Result<Self> {
+        Self::new_with_scan_progress(share_code, specify_relay, files, zip_floder, client_type, lan_broadcast, |_| {}).await
+    }
+
+    pub async fn new_with_scan_progress(
+        share_code: String,
+        specify_relay: Option<String>,
         mut files: Vec<String>,
         zip_floder: bool,
         client_type: ClientType,
         lan_broadcast: bool,
+        report: impl FnMut(ScanProgress) + Send + 'static,
     ) -> Result<Self> {
         paths_exist(files.as_slice())?;
         let lifecycle = SenderLifecycle::new();
@@ -146,7 +160,14 @@ impl FlashCatSender {
             files = treated_files;
             zip_dirs = zip;
         }
-        let file_collector = collect_files(files.as_slice());
+        let scan_cancel = Shutdown::new();
+        let worker_cancel = scan_cancel.clone();
+        let _cancel_on_drop = CancelScanOnDrop(scan_cancel.clone());
+        let scan = tokio::task::spawn_blocking(move || collect_files_with_progress(&files, &worker_cancel, report));
+        let file_collector = tokio::select! {
+            result = scan => result??,
+            _ = tokio::signal::ctrl_c() => { scan_cancel.shutdown(); bail!("File scan cancelled"); }
+        };
         let encryptor = Arc::new(Encryptor::new(share_code)?);
         Ok(Self {
             zip_dirs,
@@ -162,16 +183,20 @@ impl FlashCatSender {
     pub fn new_with_file_collector(
         share_code: String,
         specify_relay: Option<String>,
-        file_collector: FileCollector,
+        file_collector: impl Into<Arc<FileCollector>>,
         client_type: ClientType,
         lan_broadcast: bool,
     ) -> Result<Self> {
+        let file_collector = file_collector.into();
+        if file_collector.files.is_empty() {
+            bail!("No files to send");
+        }
         let encryptor = Arc::new(Encryptor::new(share_code)?);
         Ok(Self {
             zip_dirs: vec![],
             encryptor,
             specify_relay,
-            file_collector: Arc::new(file_collector),
+            file_collector,
             lifecycle: SenderLifecycle::new(),
             client_type,
             lan_broadcast,
@@ -596,6 +621,7 @@ impl FlashCatSender {
                             &tx,
                             RelayMessage::Sender(SenderUpdate {
                                 sender_message: Some(SenderMessage::SendRequest(SendRequest {
+                                    num_entries: file_collector.files.len() as u64,
                                     total_size: file_collector.total_size,
                                     num_files: file_collector.num_files,
                                     num_folders: file_collector.num_folders,
@@ -683,6 +709,14 @@ impl FlashCatSender {
                                     file_request_window = (window as usize).clamp(1, FILE_REQUEST_WINDOW);
                                 }
                             }
+                            ReceiverMessage::FileResult(result) => {
+                                let failure = result.status() == crate::FileStatus::Failed;
+                                let error = result.error.clone();
+                                Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::FileResult(result)).await?;
+                                if failure {
+                                    bail!("Receiver could not save file: {error}");
+                                }
+                            }
                             ReceiverMessage::FileConfirm(file_confirm) => {
                                 confirm_tx.send(file_confirm).await?;
                             }
@@ -695,7 +729,7 @@ impl FlashCatSender {
                                 send_files_cancel = cancel.child_token();
                                 let mut resume_progress = HashMap::new();
                                 for fp in resume_state.files {
-                                    resume_progress.insert(fp.file_id, (fp.received_bytes, fp.completed));
+                                    resume_progress.insert(fp.file_id, (fp.received_bytes, fp.completed, fp.source_identity));
                                 }
                                 let encryptor = encryptor.clone();
                                 let file_collector = file_collector.clone();
@@ -738,6 +772,7 @@ impl FlashCatSender {
                     .await?;
                 }
                 RelayMessage::Terminated(_) => {
+                    Self::stop_send_task(&mut send_task, &send_files_cancel).await;
                     Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::OtherClose).await?;
                     return Ok(());
                 }
@@ -765,56 +800,62 @@ impl FlashCatSender {
         notify: async_channel::Receiver<FileConfirm>,
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
         cancel: CancellationToken,
-        resume_progress: Option<HashMap<u64, (u64, bool)>>,
+        resume_progress: Option<HashMap<u64, (u64, bool, String)>>,
         file_request_window: usize,
     ) -> Result<()> {
         let transfer = async {
             let mut progress = ProgressThrottle::default();
             let pool = ChunkPool::default();
-            let mut files = file_collector
+            let resume_progress = resume_progress.unwrap_or_default();
+            for file in &file_collector.files {
+                if let Some((position, _, identity)) = resume_progress.get(&file.file_id) {
+                    resume_position(file, *position, identity).await?;
+                }
+            }
+            let files = file_collector
                 .files
                 .iter()
-                .filter(|file| !resume_progress.as_ref().and_then(|p| p.get(&file.file_id)).is_some_and(|(_, completed)| *completed))
-                .collect::<Vec<_>>()
-                .into_iter()
-                .peekable();
+                .enumerate()
+                .filter(|(_, file)| !resume_progress.get(&file.file_id).is_some_and(|(_, completed, _)| *completed))
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
             let window = file_request_window.clamp(1, FILE_REQUEST_WINDOW);
-            while let Some(first) = files.next() {
-                let mut batch = vec![first];
-                while batch.len() < window {
-                    let Some(next) = files.peek() else {
-                        break;
-                    };
-                    // Requests may open existing targets. Never pre-open the same
-                    // output path (or an ancestor) while an earlier file uses it.
-                    if batch.iter().any(|file| paths_overlap(&file.relative_path, &next.relative_path)) {
+            let mut confirmations = FileConfirmations::default();
+            let mut requested = VecDeque::<usize>::new();
+            let mut next = 0;
+            let mut sent = 0;
+            while sent < files.len() {
+                // Metadata lookahead stays bounded and slides after each file;
+                // preparing a request never scans file contents.
+                while requested.len() < window && next < files.len() {
+                    let index = files[next];
+                    let file = &file_collector.files[index];
+                    if requested.iter().any(|&pending| paths_overlap(&file.relative_path, &file_collector.files[pending].relative_path)) {
                         break;
                     }
-                    batch.push(files.next().unwrap());
-                }
-                let mut confirmations = FileConfirmations::default();
-                for file in &batch {
-                    if resume_progress.as_ref().and_then(|p| p.get(&file.file_id)).is_none() {
+                    if !resume_progress.contains_key(&file.file_id) {
                         confirmations.expected.insert(file.file_id);
                         Self::request_file(file, &tx).await?;
                     }
+                    requested.push_back(index);
+                    next += 1;
                 }
-                for file in batch {
-                    let resume = resume_progress.as_ref().and_then(|p| p.get(&file.file_id).copied());
-                    Self::send_single_file(
-                        file,
-                        &encryptor,
-                        &tx,
-                        &notify,
-                        sender_stream_tx,
-                        &cancel,
-                        resume,
-                        &mut progress,
-                        &mut confirmations,
-                        &pool,
-                    )
-                    .await?;
-                }
+                let index = requested.pop_front().ok_or_else(|| anyhow::anyhow!("Missing requested transfer file"))?;
+                let file = &file_collector.files[index];
+                Self::send_single_file(
+                    file,
+                    &encryptor,
+                    &tx,
+                    &notify,
+                    sender_stream_tx,
+                    &cancel,
+                    resume_progress.get(&file.file_id).cloned(),
+                    &mut progress,
+                    &mut confirmations,
+                    &pool,
+                )
+                .await?;
+                sent += 1;
             }
             send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
             Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::SendDone).await?;
@@ -823,7 +864,12 @@ impl FlashCatSender {
         tokio::select! {
             biased;
             _ = cancel.cancelled() => Ok(()),
-            result = transfer => result,
+            // The relay receive loop owns disconnect/reconnect reporting. A
+            // closed upload stream must not race its terminal notification.
+            _ = tx.closed() => Ok(()),
+            result = transfer => {
+                if tx.is_closed() { Ok(()) } else { result }
+            },
         }
     }
 
@@ -831,6 +877,7 @@ impl FlashCatSender {
         send_file: &FileInfo,
         tx: &mpsc::Sender<RelayUpdate>,
     ) -> Result<()> {
+        validate_source(send_file).await?;
         send_msg_to_relay(
             tx,
             RelayMessage::Sender(SenderUpdate {
@@ -844,6 +891,7 @@ impl FlashCatSender {
                     relative_path: send_file.relative_path.clone(),
                     total_size: send_file.size,
                     is_empty_dir: send_file.empty_dir,
+                    source_identity: send_file.source_identity.clone(),
                 })),
             }),
         )
@@ -857,14 +905,15 @@ impl FlashCatSender {
         notify: &async_channel::Receiver<FileConfirm>,
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
         cancel: &CancellationToken,
-        file_resume: Option<(u64, bool)>,
+        file_resume: Option<(u64, bool, String)>,
         progress: &mut ProgressThrottle,
         confirmations: &mut FileConfirmations,
         pool: &ChunkPool,
     ) -> Result<()> {
         // Resume: partial file — send BreakPoint and stream remaining data
-        if let Some((received_bytes, _)) = file_resume {
+        if let Some((received_bytes, _, identity)) = file_resume {
             if !send_file.empty_dir {
+                let received_bytes = resume_position(send_file, received_bytes, &identity).await?;
                 let _ = Self::send_msg_to_stream(
                     sender_stream_tx,
                     SenderInteractionMessage::Message(format!("Resuming file {} from {}", send_file.name, received_bytes)),
@@ -897,6 +946,15 @@ impl FlashCatSender {
             }
         }
 
+        Self::send_msg_to_stream(
+            sender_stream_tx,
+            SenderInteractionMessage::FileStage(FileStage {
+                file_id: send_file.file_id,
+                phase: TransferPhase::Waiting,
+                position: 0,
+            }),
+        )
+        .await?;
         let file_confirm = tokio::time::timeout(FILE_CONFIRM_TIMEOUT, confirmations.wait(send_file.file_id, notify)).await.map_err(|_| {
             anyhow::anyhow!(
                 "timed out waiting for receiver confirmation for file {} after {}s",
@@ -919,11 +977,6 @@ impl FlashCatSender {
                         return Ok(());
                     }
                     if new_file_confirm.confirm == Confirm::Reject.into() {
-                        Self::send_msg_to_stream(
-                            sender_stream_tx,
-                            SenderInteractionMessage::ContinueFile(new_file_confirm.file_id),
-                        )
-                        .await?;
                         return Ok(());
                     }
                 }
@@ -937,7 +990,7 @@ impl FlashCatSender {
                         return Ok(());
                     }
                     if break_point_confirm.confirm == Confirm::Accept.into() {
-                        position = break_point_confirm.position;
+                        position = resume_position(send_file, break_point_confirm.position, &break_point_confirm.source_identity).await?;
                         send_msg_to_relay(
                             tx,
                             RelayMessage::Sender(SenderUpdate {
@@ -970,6 +1023,16 @@ impl FlashCatSender {
         progress: &mut ProgressThrottle,
         pool: &ChunkPool,
     ) -> Result<()> {
+        validate_source(send_file).await?;
+        Self::send_msg_to_stream(
+            sender_stream_tx,
+            SenderInteractionMessage::FileStage(FileStage {
+                file_id: send_file.file_id,
+                phase: TransferPhase::Transferring,
+                position: start_position,
+            }),
+        )
+        .await?;
         let mut chunks = FileChunks::new(
             send_file.access_path.clone(),
             start_position,
@@ -984,6 +1047,10 @@ impl FlashCatSender {
                 result = chunks.next() => result?,
             };
             let Some(mut chunk) = chunk else {
+                if position != send_file.size {
+                    bail!("Source file size changed: {}", send_file.access_path);
+                }
+                validate_source(send_file).await?;
                 send_msg_to_relay(
                     tx,
                     RelayMessage::Sender(SenderUpdate {
@@ -1003,7 +1070,11 @@ impl FlashCatSender {
                 .await?;
                 Self::send_msg_to_stream(
                     sender_stream_tx,
-                    SenderInteractionMessage::FileProgressFinish(send_file.file_id),
+                    SenderInteractionMessage::FileStage(FileStage {
+                        file_id: send_file.file_id,
+                        phase: TransferPhase::Saving,
+                        position,
+                    }),
                 )
                 .await?;
                 return Ok(());
@@ -1170,5 +1241,76 @@ impl FileConfirmations {
             }
             self.buffered.insert(id, confirm);
         }
+    }
+}
+
+async fn resume_position(
+    file: &FileInfo,
+    position: u64,
+    identity: &str,
+) -> Result<u64> {
+    if position > file.size {
+        bail!("Resume position exceeds source file size");
+    }
+    let (identity, proof) = identity.split_once(":sha256:").map_or((identity, None), |(identity, proof)| (identity, Some(proof)));
+    if identity != file.source_identity {
+        bail!("Resume metadata differs from source file: {}", file.name);
+    }
+    if let Some(proof) = proof {
+        validate_source(file).await?;
+        let actual = prefix_digest(tokio::fs::File::open(&file.access_path).await?, position).await?;
+        if proof != actual {
+            bail!(
+                "Cannot resume {}: existing content differs from the source. Receive again and choose restart.",
+                file.name
+            );
+        }
+        validate_source(file).await?;
+    }
+    Ok(position)
+}
+
+async fn validate_source(file: &FileInfo) -> Result<()> {
+    if file.empty_dir {
+        return Ok(());
+    }
+    let metadata = tokio::fs::metadata(&file.access_path).await?;
+    if !metadata.is_file() || metadata.len() != file.size || file_identity(&metadata)? != file.source_identity {
+        bail!("Source file changed during transfer: {}", file.access_path);
+    }
+    Ok(())
+}
+
+struct CancelScanOnDrop(Shutdown);
+impl Drop for CancelScanOnDrop {
+    fn drop(&mut self) {
+        self.0.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod resume_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn resume_checks_existing_prefix_including_after_reconnect() {
+        let path = std::env::temp_dir().join(format!("flash-cat-prefix-{}", rand::random::<u64>()));
+        tokio::fs::write(&path, b"abcdefgh").await.unwrap();
+        let metadata = tokio::fs::metadata(&path).await.unwrap();
+        let file = FileInfo {
+            name: "test".into(),
+            access_path: path.to_string_lossy().into_owned(),
+            size: 8,
+            source_identity: file_identity(&metadata).unwrap(),
+            ..Default::default()
+        };
+        let digest = prefix_digest(tokio::fs::File::open(&path).await.unwrap(), 4).await.unwrap();
+        let proof = format!("{}:sha256:{digest}", file.source_identity);
+        assert_eq!(resume_position(&file, 4, &proof).await.unwrap(), 4);
+        assert!(resume_position(&file, 5, &proof).await.is_err());
+        assert!(resume_position(&file, 4, &format!("{}:sha256:invalid", file.source_identity)).await.is_err());
+        assert!(resume_position(&file, 9, &file.source_identity).await.is_err());
+        assert_eq!(resume_position(&file, 4, &file.source_identity).await.unwrap(), 4);
+        tokio::fs::remove_file(path).await.unwrap();
     }
 }
