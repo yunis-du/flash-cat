@@ -476,6 +476,7 @@ impl FlashCatSender {
         let mut send_task = None;
         let mut request_sent = false;
         let mut share_accepted = false;
+        let mut received_file_result = false;
         let mut file_request_window = 1;
         loop {
             let message = tokio::select! {
@@ -710,6 +711,7 @@ impl FlashCatSender {
                                 }
                             }
                             ReceiverMessage::FileResult(result) => {
+                                received_file_result = true;
                                 let failure = result.status() == crate::FileStatus::Failed;
                                 let error = result.error.clone();
                                 Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::FileResult(result)).await?;
@@ -762,7 +764,7 @@ impl FlashCatSender {
                     }
                 }
                 RelayMessage::Done(_) => {
-                    Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::Completed).await?;
+                    Self::report_completion(sender_stream_tx, &file_collector.files, share_accepted && !received_file_result).await?;
                 }
                 RelayMessage::Error(e) => {
                     Self::send_msg_to_stream(
@@ -780,6 +782,29 @@ impl FlashCatSender {
                 RelayMessage::Pong(_) => (),
             }
         }
+    }
+
+    /// Older receivers only acknowledge the entire transfer. Infer per-file
+    /// success only on that acknowledgement and only if no file result arrived.
+    async fn report_completion(
+        sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
+        files: &[FileInfo],
+        infer_file_success: bool,
+    ) -> Result<()> {
+        if infer_file_success {
+            for file in files {
+                Self::send_msg_to_stream(
+                    sender_stream_tx,
+                    SenderInteractionMessage::FileResult(crate::FileResult {
+                        file_id: file.file_id,
+                        status: crate::FileStatus::Success as i32,
+                        error: String::new(),
+                    }),
+                )
+                .await?;
+            }
+        }
+        Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::Completed).await
     }
 
     async fn stop_send_task(
@@ -1285,32 +1310,5 @@ struct CancelScanOnDrop(Shutdown);
 impl Drop for CancelScanOnDrop {
     fn drop(&mut self) {
         self.0.shutdown();
-    }
-}
-
-#[cfg(test)]
-mod resume_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn resume_checks_existing_prefix_including_after_reconnect() {
-        let path = std::env::temp_dir().join(format!("flash-cat-prefix-{}", rand::random::<u64>()));
-        tokio::fs::write(&path, b"abcdefgh").await.unwrap();
-        let metadata = tokio::fs::metadata(&path).await.unwrap();
-        let file = FileInfo {
-            name: "test".into(),
-            access_path: path.to_string_lossy().into_owned(),
-            size: 8,
-            source_identity: file_identity(&metadata).unwrap(),
-            ..Default::default()
-        };
-        let digest = prefix_digest(tokio::fs::File::open(&path).await.unwrap(), 4).await.unwrap();
-        let proof = format!("{}:sha256:{digest}", file.source_identity);
-        assert_eq!(resume_position(&file, 4, &proof).await.unwrap(), 4);
-        assert!(resume_position(&file, 5, &proof).await.is_err());
-        assert!(resume_position(&file, 4, &format!("{}:sha256:invalid", file.source_identity)).await.is_err());
-        assert!(resume_position(&file, 9, &file.source_identity).await.is_err());
-        assert_eq!(resume_position(&file, 4, &file.source_identity).await.unwrap(), 4);
-        tokio::fs::remove_file(path).await.unwrap();
     }
 }

@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const REFRESH: Duration = Duration::from_millis(100);
+const REFRESH: Duration = Duration::from_millis(80);
 
 /// Keep terminal redraws out of an interactive prompt without holding a drawing
 /// lock while waiting for input. Dropping the prompt future also restores output.
@@ -19,8 +19,8 @@ pub(crate) struct PromptDisplay {
 impl Drop for PromptDisplay {
     fn drop(&mut self) {
         self.multi.set_draw_target(ProgressDrawTarget::stderr());
-        for bar in &self.bars {
-            bar.enable_steady_tick(REFRESH);
+        if let Some(bar) = self.bars.first() {
+            bar.force_draw();
         }
     }
 }
@@ -55,12 +55,7 @@ impl Drop for Progress {
             bar.abandon_with_message("Interrupted");
         }
         if let Some(total) = &self.total {
-            total.abandon_with_message(format!(
-                "{}/{} entries • {} transferred • Interrupted",
-                self.finished,
-                self.num_files,
-                HumanBytes(self.transferred),
-            ));
+            total.abandon_with_message(format!("{}/{} • Interrupted", self.finished, self.num_files));
         }
     }
 }
@@ -68,9 +63,6 @@ impl Drop for Progress {
 impl Progress {
     pub(crate) fn pause_for_prompt(&self) -> PromptDisplay {
         let bars = self.bars.values().cloned().collect::<Vec<_>>();
-        for bar in &bars {
-            bar.disable_steady_tick();
-        }
         let _ = self.multi.clear();
         self.multi.set_draw_target(ProgressDrawTarget::hidden());
         PromptDisplay {
@@ -201,9 +193,9 @@ impl Progress {
                 TransferPhase::Transferring => "Transferring • ETA —",
                 TransferPhase::Saving => "Saving at receiver",
             });
-            bar.enable_steady_tick(REFRESH);
         }
         self.update_total();
+        self.draw(stage.file_id);
     }
     pub fn set_position(
         &mut self,
@@ -242,6 +234,17 @@ impl Progress {
             }
         }
         self.update_total();
+        self.draw(id);
+    }
+    // Core throttles intermediate progress events. Render the complete state
+    // once at the end of each event, without a timer for every file bar.
+    fn draw(
+        &self,
+        id: u64,
+    ) {
+        if let Some(bar) = self.total.as_ref().or_else(|| self.bars.get(&id)) {
+            bar.force_draw();
+        }
     }
     fn update_total(&self) {
         if let Some(total) = &self.total {
@@ -258,13 +261,7 @@ impl Progress {
                 "—".to_owned()
             };
             total.set_position(self.processed.min(self.total_size));
-            total.set_message(format!(
-                "{}/{} entries • {} transferred • ETA {}",
-                self.finished,
-                self.num_files,
-                HumanBytes(self.transferred),
-                eta,
-            ));
+            total.set_message(format!("{}/{} • ETA {}", self.finished, self.num_files, eta));
         }
     }
     pub fn finish(
@@ -315,6 +312,10 @@ impl Progress {
                 format!("{label}: {} ({})", file.name, HumanBytes(file.size))
             };
             if let Some(bar) = self.bars.remove(&id) {
+                // Detach without drawing an empty frame. println below renders
+                // the completed line and remaining bars together.
+                bar.disable_steady_tick();
+                self.multi.remove(&bar);
                 bar.finish_and_clear();
             }
             self.println(&text);
@@ -323,7 +324,7 @@ impl Progress {
         if self.finished == self.num_files {
             if let Some(total) = self.total.take() {
                 let summary = format!(
-                    "  \x1b[1;32m{:<width$}\x1b[0m [\x1b[36m{}\x1b[0m] {} transferred • in {:#} • {}/{} entries",
+                    "  \x1b[1;32m{:<width$}\x1b[0m [\x1b[36m{}\x1b[0m] {} • in {:#} • {}/{}",
                     "Total",
                     "#".repeat(50),
                     HumanBytes(self.transferred),
@@ -332,9 +333,9 @@ impl Progress {
                     self.num_files,
                     width = self.name_width,
                 );
+                self.multi.remove(&total);
                 total.finish_and_clear();
-                self.println("  ------------------------");
-                self.println(&summary);
+                self.println(&format!("  ------------------------\n{summary}"));
             }
         }
     }
@@ -355,7 +356,12 @@ impl Progress {
         &self,
         msg: &str,
     ) {
-        self.multi.suspend(|| println!("{msg}"));
+        if self.multi.is_hidden() {
+            // Keep messages in redirected output, where indicatif hides bars.
+            println!("{msg}");
+        } else {
+            let _ = self.multi.println(msg);
+        }
     }
 }
 fn truncate(
