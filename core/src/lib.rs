@@ -13,6 +13,8 @@ use flash_cat_common::{
     proto::{CloseRequest, RelayUpdate, relay_service_client::RelayServiceClient, relay_update::RelayMessage},
 };
 
+mod chunks;
+mod progress;
 pub mod receiver;
 pub mod sender;
 

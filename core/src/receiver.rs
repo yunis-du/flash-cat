@@ -1,7 +1,7 @@
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     net::SocketAddr,
     path::{Path, PathBuf},
     pin::Pin,
@@ -10,33 +10,31 @@ use std::{
 };
 
 use anyhow::{Result, anyhow, bail};
+use bytes::Bytes;
 use tokio::{
     fs,
-    io::{AsyncSeekExt, AsyncWriteExt, SeekFrom},
-    sync::{mpsc, oneshot},
+    io::{AsyncSeekExt, AsyncWriteExt, BufWriter, SeekFrom},
+    sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot},
 };
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream as TokioReceiverStream};
 use tonic::transport::Endpoint;
 
 use flash_cat_common::{
     Shutdown, compare_versions,
-    consts::{PUBLIC_RELAY, RELAY_CHANNEL_CAPACITY, SEND_BUFF_SIZE},
+    consts::{FILE_REQUEST_WINDOW, PUBLIC_RELAY, RELAY_CHANNEL_CAPACITY, TRANSFER_QUEUE_BYTES},
     crypt::encryptor::Encryptor,
     proto::{
-        BreakPointConfirm, Character, ClientType, Confirm, Done, FileConfirm, FileResumeProgress, Id, JoinRequest, NewFileConfirm, ReceiverUpdate, RelayUpdate,
-        ResumeState, file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage, relay_service_client::RelayServiceClient,
-        relay_update::RelayMessage, sender_update::SenderMessage,
+        BreakPointConfirm, Character, ClientType, Confirm, Done, FileConfirm, FileResumeProgress, Id, JoinRequest, NewFileConfirm, NewFileRequest,
+        ReceiverUpdate, RelayUpdate, ResumeState, SenderUpdate, file_confirm::ConfirmMessage, join_response, receiver_update::ReceiverMessage,
+        relay_service_client::RelayServiceClient, relay_update::RelayMessage, sender_update::SenderMessage,
     },
-    utils::{
-        fs::{missing_chunks, safe_join_relative_path},
-        net::net_scout::NetScout,
-    },
+    utils::{fs::safe_join_relative_path, net::net_scout::NetScout},
 };
 use flash_cat_relay::built_info;
 
 use crate::{
     BreakPoint, FileDuplication, PING_INTERVAL, Progress, ReceiverConfirm, ReceiverInteractionMessage, RecvNewFile, RelayType, SendFilesRequest,
-    close_relay_session, close_relay_session_at, get_endpoint, normalize_relay_endpoint, send_msg_to_relay,
+    close_relay_session, close_relay_session_at, get_endpoint, normalize_relay_endpoint, progress::ProgressThrottle, send_msg_to_relay,
 };
 
 /// Receiver stream
@@ -324,222 +322,243 @@ impl FlashCatReceiver {
         let mut file_states: HashMap<u64, ReceiveFileState> = HashMap::new();
         let mut share_confirm = None;
         let mut transfer_mode_reported = false;
+        let mut progress = ProgressThrottle::default();
+        let mut file_request_window = 1;
+        let mut pending_requests = PendingFileRequests::default();
 
         let mut ping_interval = tokio::time::interval(PING_INTERVAL);
         let mut reconnect_attempt = 0u32;
         loop {
-            let message = tokio::select! {
-                _ = shutdown.wait() => {
-                    close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
-                    return Ok(());
-                }
-                _ = ping_interval.tick() => {
-                    let _ = send_msg_to_relay(&tx, RelayMessage::Ping(0)).await;
-                    continue;
-                }
-                Ok(confirm) = confirm_rx.recv() => {
-                    match confirm {
-                        ReceiverConfirm::ReceiveConfirm(accept) => {
-                            share_confirm = Some(accept);
-                            if accept {
-                                let share_accept = RelayMessage::Receiver(ReceiverUpdate {
-                                    receiver_message: Some(ReceiverMessage::ShareConfirm(
-                                        Confirm::Accept.into(),
-                                    )),
-                                });
-                                send_msg_to_relay(&tx, share_accept).await?;
-                            } else {
-                                let share_reject = RelayMessage::Receiver(ReceiverUpdate {
-                                    receiver_message: Some(ReceiverMessage::ShareConfirm(
-                                        Confirm::Reject.into(),
-                                    )),
-                                });
-                                send_msg_to_relay(&tx, share_reject).await?;
-                            }
-                        }
-                        ReceiverConfirm::FileConfirm((accept, file_id)) => {
-                            let file_confirm = if accept {
-                                RelayMessage::Receiver(ReceiverUpdate {
-                                    receiver_message: Some(ReceiverMessage::FileConfirm(
-                                        FileConfirm {
-                                            confirm_message: Some(ConfirmMessage::NewFileConfirm(
-                                                NewFileConfirm {
-                                                    file_id: file_id,
-                                                    confirm: Confirm::Accept.into(),
-                                                },
-                                            )),
-                                        },
-                                    )),
-                                })
-                            } else {
-                                RelayMessage::Receiver(ReceiverUpdate {
-                                    receiver_message: Some(ReceiverMessage::FileConfirm(
-                                        FileConfirm {
-                                            confirm_message: Some(ConfirmMessage::NewFileConfirm(
-                                                NewFileConfirm {
-                                                    file_id: file_id,
-                                                    confirm: Confirm::Reject.into(),
-                                                },
-                                            )),
-                                        },
-                                    )),
-                                })
-                            };
-                            send_msg_to_relay(&tx, file_confirm).await?;
-                            if let Some(state) = file_states.get_mut(&file_id) {
+            let message = if let Some(request) = pending_requests.next_ready() {
+                RelayMessage::Sender(SenderUpdate {
+                    sender_message: Some(SenderMessage::NewFileRequest(request)),
+                })
+            } else {
+                tokio::select! {
+                    _ = shutdown.wait() => {
+                        close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
+                        return Ok(());
+                    }
+                    _ = ping_interval.tick() => {
+                        let _ = send_msg_to_relay(&tx, RelayMessage::Ping(0)).await;
+                        continue;
+                    }
+                    Ok(confirm) = confirm_rx.recv() => {
+                        match confirm {
+                            ReceiverConfirm::ReceiveConfirm(accept) => {
+                                share_confirm = Some(accept);
                                 if accept {
-                                    let recv_file = state.file.as_mut().ok_or_else(|| anyhow!("receive file is not open"))?;
-                                    recv_file.restart().await?;
-                                    state.received_bytes = 0;
-                                } else {
-                                    if let Some(mut recv_file) = state.file.take() {
-                                        recv_file.finish().await?;
+                                    if file_request_window > 1 {
+                                        send_msg_to_relay(&tx, RelayMessage::Receiver(ReceiverUpdate {
+                                            receiver_message: Some(ReceiverMessage::FileRequestWindow(file_request_window)),
+                                        })).await?;
                                     }
-                                    state.completed = true;
+                                    let share_accept = RelayMessage::Receiver(ReceiverUpdate {
+                                        receiver_message: Some(ReceiverMessage::ShareConfirm(
+                                            Confirm::Accept.into(),
+                                        )),
+                                    });
+                                    send_msg_to_relay(&tx, share_accept).await?;
+                                } else {
+                                    let share_reject = RelayMessage::Receiver(ReceiverUpdate {
+                                        receiver_message: Some(ReceiverMessage::ShareConfirm(
+                                            Confirm::Reject.into(),
+                                        )),
+                                    });
+                                    send_msg_to_relay(&tx, share_reject).await?;
                                 }
                             }
-                        }
-                        ReceiverConfirm::BreakPointConfirm((accept, file_id, position)) => {
-                            let break_point_confirm = if accept {
-                                RelayMessage::Receiver(ReceiverUpdate {
-                                    receiver_message: Some(ReceiverMessage::FileConfirm(
-                                        FileConfirm {
-                                            confirm_message: Some(ConfirmMessage::BreakPointConfirm(
-                                                BreakPointConfirm {
-                                                    file_id: file_id,
-                                                    confirm: Confirm::Accept.into(),
-                                                    position: position,
-                                                },
-                                            )),
-                                        },
-                                    )),
-                                })
-                            } else {
-                                RelayMessage::Receiver(ReceiverUpdate {
-                                    receiver_message: Some(ReceiverMessage::FileConfirm(
-                                        FileConfirm {
-                                            confirm_message: Some(ConfirmMessage::BreakPointConfirm(
-                                                BreakPointConfirm {
-                                                    file_id: file_id,
-                                                    confirm: Confirm::Reject.into(),
-                                                    position: 0,
-                                                },
-                                            )),
-                                        },
-                                    )),
-                                })
-                            };
-                            send_msg_to_relay(&tx, break_point_confirm).await?;
-                            if !accept {
+                            ReceiverConfirm::FileConfirm((accept, file_id)) => {
+                                if pending_requests.waiting_for != Some(file_id) { continue; }
+                                let file_confirm = if accept {
+                                    RelayMessage::Receiver(ReceiverUpdate {
+                                        receiver_message: Some(ReceiverMessage::FileConfirm(
+                                            FileConfirm {
+                                                confirm_message: Some(ConfirmMessage::NewFileConfirm(
+                                                    NewFileConfirm {
+                                                        file_id: file_id,
+                                                        confirm: Confirm::Accept.into(),
+                                                    },
+                                                )),
+                                            },
+                                        )),
+                                    })
+                                } else {
+                                    RelayMessage::Receiver(ReceiverUpdate {
+                                        receiver_message: Some(ReceiverMessage::FileConfirm(
+                                            FileConfirm {
+                                                confirm_message: Some(ConfirmMessage::NewFileConfirm(
+                                                    NewFileConfirm {
+                                                        file_id: file_id,
+                                                        confirm: Confirm::Reject.into(),
+                                                    },
+                                                )),
+                                            },
+                                        )),
+                                    })
+                                };
+                                if let Some(state) = file_states.get_mut(&file_id) {
+                                    if accept {
+                                        let recv_file = state.file.as_mut().ok_or_else(|| anyhow!("receive file is not open"))?;
+                                        recv_file.restart().await?;
+                                        state.received_bytes = 0;
+                                    } else {
+                                        if let Some(mut recv_file) = state.file.take() {
+                                            recv_file.finish().await?;
+                                        }
+                                        state.completed = true;
+                                    }
+                                }
+                                pending_requests.waiting_for = None;
+                                send_msg_to_relay(&tx, file_confirm).await?;
+                            }
+                            ReceiverConfirm::BreakPointConfirm((accept, file_id, position)) => {
+                                if pending_requests.waiting_for != Some(file_id) { continue; }
+                                let break_point_confirm = if accept {
+                                    RelayMessage::Receiver(ReceiverUpdate {
+                                        receiver_message: Some(ReceiverMessage::FileConfirm(
+                                            FileConfirm {
+                                                confirm_message: Some(ConfirmMessage::BreakPointConfirm(
+                                                    BreakPointConfirm {
+                                                        file_id: file_id,
+                                                        confirm: Confirm::Accept.into(),
+                                                        position: position,
+                                                    },
+                                                )),
+                                            },
+                                        )),
+                                    })
+                                } else {
+                                    RelayMessage::Receiver(ReceiverUpdate {
+                                        receiver_message: Some(ReceiverMessage::FileConfirm(
+                                            FileConfirm {
+                                                confirm_message: Some(ConfirmMessage::BreakPointConfirm(
+                                                    BreakPointConfirm {
+                                                        file_id: file_id,
+                                                        confirm: Confirm::Reject.into(),
+                                                        position: 0,
+                                                    },
+                                                )),
+                                            },
+                                        )),
+                                    })
+                                };
                                 if let Some(state) = file_states.get_mut(&file_id) {
                                     let recv_file = state.file.as_mut().ok_or_else(|| anyhow!("receive file is not open"))?;
-                                    recv_file.restart().await?;
-                                    state.received_bytes = 0;
-                                }
-                            }
-                        }
-                    }
-                    continue;
-                }
-                item = messages.next() => {
-                    match item {
-                        Some(Ok(update)) => {
-                            match update.relay_message {
-                                Some(msg) => {
-                                    reconnect_attempt = 0;
-                                    msg
-                                }
-                                None => continue,
-                            }
-                        }
-                        Some(Err(_)) | None => {
-                            if shutdown.is_terminated() {
-                                close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
-                                return Ok(());
-                            }
-
-                            let result = loop {
-                                if !crate::should_retry(reconnect_attempt) {
-                                    let message = "max reconnect retries exceeded".to_string();
-                                    Self::send_msg_to_stream(
-                                        receiver_stream_tx,
-                                        ReceiverInteractionMessage::ReconnectFailed(message),
-                                    )
-                                    .await?;
-                                    shutdown.shutdown();
-                                    return Ok(());
-                                }
-                                let delay = crate::reconnect_delay(reconnect_attempt);
-                                let _ = Self::send_msg_to_stream(
-                                    receiver_stream_tx,
-                                    ReceiverInteractionMessage::Message(format!(
-                                        "Connection lost, reconnecting in {}s... (attempt {}/{})",
-                                        delay.as_secs(),
-                                        reconnect_attempt + 1,
-                                        flash_cat_common::consts::MAX_RECONNECT_RETRIES
-                                    )),
-                                )
-                                .await;
-                                tokio::select! {
-                                    _ = shutdown.wait() => {
-                                        close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
-                                        return Ok(());
+                                    if accept {
+                                        recv_file.seek(position).await?;
+                                        state.received_bytes = position;
+                                    } else {
+                                        recv_file.restart().await?;
+                                        state.received_bytes = 0;
                                     }
-                                    _ = tokio::time::sleep(delay) => (),
                                 }
-                                reconnect_attempt += 1;
-
+                                pending_requests.waiting_for = None;
+                                send_msg_to_relay(&tx, break_point_confirm).await?;
+                            }
+                        }
+                        continue;
+                    }
+                    item = messages.next() => {
+                        match item {
+                            Some(Ok(update)) => {
+                                match update.relay_message {
+                                    Some(msg) => {
+                                        reconnect_attempt = 0;
+                                        msg
+                                    }
+                                    None => continue,
+                                }
+                            }
+                            Some(Err(_)) | None => {
                                 if shutdown.is_terminated() {
                                     close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
                                     return Ok(());
                                 }
 
-                                let reconnect = tokio::select! {
-                                    _ = shutdown.wait() => {
+                                let result = loop {
+                                    if !crate::should_retry(reconnect_attempt) {
+                                        let message = "max reconnect retries exceeded".to_string();
+                                        Self::send_msg_to_stream(
+                                            receiver_stream_tx,
+                                            ReceiverInteractionMessage::ReconnectFailed(message),
+                                        )
+                                        .await?;
+                                        shutdown.shutdown();
+                                        return Ok(());
+                                    }
+                                    let delay = crate::reconnect_delay(reconnect_attempt);
+                                    let _ = Self::send_msg_to_stream(
+                                        receiver_stream_tx,
+                                        ReceiverInteractionMessage::Message(format!(
+                                            "Connection lost, reconnecting in {}s... (attempt {}/{})",
+                                            delay.as_secs(),
+                                            reconnect_attempt + 1,
+                                            flash_cat_common::consts::MAX_RECONNECT_RETRIES
+                                        )),
+                                    )
+                                    .await;
+                                    tokio::select! {
+                                        _ = shutdown.wait() => {
+                                            close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
+                                            return Ok(());
+                                        }
+                                        _ = tokio::time::sleep(delay) => (),
+                                    }
+                                    reconnect_attempt += 1;
+
+                                    if shutdown.is_terminated() {
                                         close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
                                         return Ok(());
                                     }
-                                    result = Self::establish_channel(&encryptor, &endpoint) => result,
-                                };
-                                match reconnect {
-                                    Ok(result) => break result,
-                                    Err(e) => {
-                                        let _ = Self::send_msg_to_stream(
-                                            receiver_stream_tx,
-                                            ReceiverInteractionMessage::Message(format!(
-                                                "Reconnect failed: {e}"
-                                            )),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            };
 
-                            let (new_client, new_tx, new_messages) = result;
-                            client = new_client;
-                            tx = new_tx;
-                            messages = new_messages;
-                            if let Some(accept) = share_confirm {
-                                send_msg_to_relay(
-                                    &tx,
-                                    RelayMessage::Receiver(ReceiverUpdate {
-                                        receiver_message: Some(ReceiverMessage::ShareConfirm(if accept {
-                                            Confirm::Accept.into()
-                                        } else {
-                                            Confirm::Reject.into()
-                                        })),
-                                    }),
+                                    let reconnect = tokio::select! {
+                                        _ = shutdown.wait() => {
+                                            close_relay_session(&mut client, encryptor.encrypt_share_code_bytes()).await;
+                                            return Ok(());
+                                        }
+                                        result = Self::establish_channel(&encryptor, &endpoint) => result,
+                                    };
+                                    match reconnect {
+                                        Ok(result) => break result,
+                                        Err(e) => {
+                                            let _ = Self::send_msg_to_stream(
+                                                receiver_stream_tx,
+                                                ReceiverInteractionMessage::Message(format!(
+                                                    "Reconnect failed: {e}"
+                                                )),
+                                            )
+                                            .await;
+                                        }
+                                    }
+                                };
+
+                                let (new_client, new_tx, new_messages) = result;
+                                client = new_client;
+                                tx = new_tx;
+                                messages = new_messages;
+                                if let Some(accept) = share_confirm {
+                                    send_msg_to_relay(
+                                        &tx,
+                                        RelayMessage::Receiver(ReceiverUpdate {
+                                            receiver_message: Some(ReceiverMessage::ShareConfirm(if accept {
+                                                Confirm::Accept.into()
+                                            } else {
+                                                Confirm::Reject.into()
+                                            })),
+                                        }),
+                                    )
+                                    .await?;
+                                }
+                                reconnect_attempt = 0;
+                                ping_interval = tokio::time::interval(PING_INTERVAL);
+                                let _ = Self::send_msg_to_stream(
+                                    receiver_stream_tx,
+                                    ReceiverInteractionMessage::Message("Reconnected successfully".to_string()),
                                 )
-                                .await?;
+                                .await;
+                                continue;
                             }
-                            reconnect_attempt = 0;
-                            ping_interval = tokio::time::interval(PING_INTERVAL);
-                            let _ = Self::send_msg_to_stream(
-                                receiver_stream_tx,
-                                ReceiverInteractionMessage::Message("Reconnected successfully".to_string()),
-                            )
-                            .await;
-                            continue;
                         }
                     }
                 }
@@ -558,6 +577,7 @@ impl FlashCatReceiver {
                     if let Some(sender_message) = sender.sender_message {
                         match sender_message {
                             SenderMessage::SendRequest(send_req) => {
+                                file_request_window = send_req.file_request_window.clamp(1, FILE_REQUEST_WINDOW as u32);
                                 Self::send_msg_to_stream(
                                     receiver_stream_tx,
                                     ReceiverInteractionMessage::SendFilesRequest(SendFilesRequest {
@@ -570,6 +590,39 @@ impl FlashCatReceiver {
                                 .await?;
                             }
                             SenderMessage::NewFileRequest(new_file_req) => {
+                                if pending_requests.waiting_for.is_some() {
+                                    pending_requests.defer(new_file_req)?;
+                                    continue;
+                                }
+                                // A confirmation may cross a reconnect snapshot. Reuse
+                                // accepted state instead of reopening/truncating its file.
+                                if let Some(state) = file_states.get_mut(&new_file_req.file_id) {
+                                    let confirm_message = if state.completed {
+                                        ConfirmMessage::NewFileConfirm(NewFileConfirm {
+                                            file_id: new_file_req.file_id,
+                                            confirm: Confirm::Reject.into(),
+                                        })
+                                    } else {
+                                        if let Some(file) = state.file.as_mut() {
+                                            state.received_bytes = file.checkpoint().await?;
+                                        }
+                                        ConfirmMessage::BreakPointConfirm(BreakPointConfirm {
+                                            file_id: new_file_req.file_id,
+                                            position: state.received_bytes,
+                                            confirm: Confirm::Accept.into(),
+                                        })
+                                    };
+                                    send_msg_to_relay(
+                                        &tx,
+                                        RelayMessage::Receiver(ReceiverUpdate {
+                                            receiver_message: Some(ReceiverMessage::FileConfirm(FileConfirm {
+                                                confirm_message: Some(confirm_message),
+                                            })),
+                                        }),
+                                    )
+                                    .await?;
+                                    continue;
+                                }
                                 let accept_msg = RelayMessage::Receiver(ReceiverUpdate {
                                     receiver_message: Some(ReceiverMessage::FileConfirm(FileConfirm {
                                         confirm_message: Some(ConfirmMessage::NewFileConfirm(NewFileConfirm {
@@ -604,17 +657,9 @@ impl FlashCatReceiver {
                                     let recv_file = RecvFile::new(fs::File::options().write(true).read(true).open(&absolute_path).await?, 0).await?;
                                     file_states.insert(new_file_req.file_id, ReceiveFileState::active(recv_file, 0));
 
-                                    let direct_position = (recv_file_len > 0 && recv_file_len < new_file_req.total_size).then_some(recv_file_len);
-                                    let legacy_position = if recv_file_len == new_file_req.total_size {
-                                        missing_chunks(&absolute_path, SEND_BUFF_SIZE).ok().and_then(|(saved_chunks, missing_chunks, _)| {
-                                            (missing_chunks > 0 && saved_chunks > 0)
-                                                .then_some(((saved_chunks * SEND_BUFF_SIZE) as u64).min(new_file_req.total_size))
-                                        })
-                                    } else {
-                                        None
-                                    };
-
-                                    if let Some(position) = direct_position.or(legacy_position) {
+                                    if recv_file_len > 0 && recv_file_len < new_file_req.total_size {
+                                        let position = recv_file_len;
+                                        pending_requests.waiting_for = Some(new_file_req.file_id);
                                         if let Some(state) = file_states.get_mut(&new_file_req.file_id) {
                                             state.received_bytes = position;
                                         }
@@ -632,6 +677,7 @@ impl FlashCatReceiver {
                                         continue;
                                     }
 
+                                    pending_requests.waiting_for = Some(new_file_req.file_id);
                                     Self::send_msg_to_stream(
                                         receiver_stream_tx,
                                         ReceiverInteractionMessage::FileDuplication(FileDuplication {
@@ -674,8 +720,7 @@ impl FlashCatReceiver {
                             SenderMessage::FileData(file_data) => {
                                 let state = file_states.get_mut(&file_data.file_id).ok_or_else(|| anyhow!("receive file failed"))?;
                                 let recv_file = state.file.as_mut().ok_or_else(|| anyhow!("receive file is not open"))?;
-                                let encryptor = encryptor.clone();
-                                let data = match encryptor.decrypt(file_data.data.as_ref()) {
+                                let data = match encryptor.decrypt_owned(file_data.data) {
                                     Ok(data) => data,
                                     Err(e) => {
                                         bail!(format!("decrypt failed: {e}"));
@@ -683,20 +728,28 @@ impl FlashCatReceiver {
                                 };
                                 recv_file.write(data).await?;
                                 state.received_bytes = recv_file.get_progress();
-                                Self::send_msg_to_stream(
+                                progress.report(
                                     receiver_stream_tx,
                                     ReceiverInteractionMessage::FileProgress(Progress {
                                         file_id: file_data.file_id,
                                         position: state.received_bytes,
                                     }),
-                                )
-                                .await?;
+                                )?;
                             }
                             SenderMessage::FileDone(file_done) => {
                                 let state = file_states.get_mut(&file_done.file_id).ok_or_else(|| anyhow!("receive file failed"))?;
                                 let mut recv_file = state.file.take().ok_or_else(|| anyhow!("receive file is not open"))?;
-                                recv_file.finish().await?; // notify and wait for writer Task
+                                recv_file.finish().await?;
+                                state.received_bytes = recv_file.get_progress();
                                 state.completed = true;
+                                Self::send_msg_to_stream(
+                                    receiver_stream_tx,
+                                    ReceiverInteractionMessage::FileProgress(Progress {
+                                        file_id: file_done.file_id,
+                                        position: state.received_bytes,
+                                    }),
+                                )
+                                .await?;
                                 Self::send_msg_to_stream(
                                     receiver_stream_tx,
                                     ReceiverInteractionMessage::FileProgressFinish(file_done.file_id),
@@ -705,8 +758,17 @@ impl FlashCatReceiver {
                             }
                             SenderMessage::ResumeRequest(_) => {
                                 // Sender reconnected and asks for current file progress
+                                pending_requests.queued.clear();
                                 let mut files = Vec::new();
-                                for (&file_id, state) in file_states.iter() {
+                                for (&file_id, state) in file_states.iter_mut() {
+                                    // Unconfirmed existing files must still require consent
+                                    // after reconnection; they are not resume checkpoints.
+                                    if pending_requests.waiting_for == Some(file_id) {
+                                        continue;
+                                    }
+                                    if let Some(file) = state.file.as_mut() {
+                                        state.received_bytes = file.checkpoint().await?;
+                                    }
                                     files.push(FileResumeProgress {
                                         file_id,
                                         received_bytes: state.received_bytes,
@@ -769,8 +831,40 @@ impl FlashCatReceiver {
     }
 }
 
+/// Only one overwrite/resume prompt may be visible in CLI or GUI at a time.
+#[derive(Default)]
+struct PendingFileRequests {
+    waiting_for: Option<u64>,
+    queued: VecDeque<NewFileRequest>,
+}
+
+impl PendingFileRequests {
+    fn defer(
+        &mut self,
+        request: NewFileRequest,
+    ) -> Result<()> {
+        if self.waiting_for == Some(request.file_id) || self.queued.iter().any(|r| r.file_id == request.file_id) {
+            return Ok(());
+        }
+        if self.queued.len() >= FILE_REQUEST_WINDOW {
+            bail!("too many pending file requests");
+        }
+        self.queued.push_back(request);
+        Ok(())
+    }
+
+    fn next_ready(&mut self) -> Option<NewFileRequest> {
+        if self.waiting_for.is_none() {
+            self.queued.pop_front()
+        } else {
+            None
+        }
+    }
+}
+
 enum FileWriteCommand {
-    Write(Vec<u8>, oneshot::Sender<Result<u64, String>>),
+    Write(Bytes, OwnedSemaphorePermit),
+    Checkpoint(oneshot::Sender<Result<u64, String>>),
     Seek(u64, oneshot::Sender<Result<u64, String>>),
     Restart(oneshot::Sender<Result<u64, String>>),
     Finish,
@@ -807,6 +901,7 @@ struct RecvFile {
     tx: tokio::sync::mpsc::Sender<FileWriteCommand>,
     writer_handle: Option<tokio::task::JoinHandle<Result<()>>>,
     progress: u64,
+    budget: Arc<Semaphore>,
 }
 
 impl RecvFile {
@@ -814,77 +909,62 @@ impl RecvFile {
         mut file: fs::File,
         position: u64,
     ) -> Result<Self> {
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<FileWriteCommand>(1024);
+        // Bound queued data independently of the file size. Writes are acknowledged
+        // only at barriers, allowing reception and filesystem I/O to overlap.
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<FileWriteCommand>(64);
 
         let writer_handle = tokio::spawn(async move {
             let mut progress = position;
             file.seek(SeekFrom::Start(position)).await?;
+            let mut file = BufWriter::with_capacity(1024 * 1024, file);
             while let Some(cmd) = rx.recv().await {
                 match cmd {
-                    FileWriteCommand::Write(data, ack) => {
-                        let result: Result<u64> = async {
-                            file.write_all(&data).await?;
-                            progress += data.len() as u64;
-                            Ok(progress)
-                        }
-                        .await;
-
-                        match result {
-                            Ok(progress) => {
-                                let _ = ack.send(Ok(progress));
-                            }
-                            Err(e) => {
-                                let msg = e.to_string();
-                                let _ = ack.send(Err(msg.clone()));
-                                bail!(msg);
-                            }
+                    FileWriteCommand::Write(data, _permit) => {
+                        file.write_all(&data).await?;
+                        progress += data.len() as u64;
+                    }
+                    FileWriteCommand::Checkpoint(ack) => {
+                        let result = file.flush().await.map(|()| progress);
+                        let failed = result.is_err();
+                        let _ = ack.send(result.map_err(|e| e.to_string()));
+                        if failed {
+                            bail!("failed to flush receive file");
                         }
                     }
                     FileWriteCommand::Seek(position, ack) => {
                         let result: Result<u64> = async {
+                            file.flush().await?;
                             file.seek(SeekFrom::Start(position)).await?;
                             progress = position;
                             Ok(progress)
                         }
                         .await;
-
-                        match result {
-                            Ok(progress) => {
-                                let _ = ack.send(Ok(progress));
-                            }
-                            Err(e) => {
-                                let msg = e.to_string();
-                                let _ = ack.send(Err(msg.clone()));
-                                bail!(msg);
-                            }
+                        let failed = result.is_err();
+                        let _ = ack.send(result.map_err(|e| e.to_string()));
+                        if failed {
+                            bail!("failed to seek receive file");
                         }
                     }
                     FileWriteCommand::Restart(ack) => {
                         let result: Result<u64> = async {
-                            file.set_len(0).await?;
+                            file.flush().await?;
+                            file.get_mut().set_len(0).await?;
                             file.seek(SeekFrom::Start(0)).await?;
                             progress = 0;
                             Ok(progress)
                         }
                         .await;
-
-                        match result {
-                            Ok(progress) => {
-                                let _ = ack.send(Ok(progress));
-                            }
-                            Err(e) => {
-                                let msg = e.to_string();
-                                let _ = ack.send(Err(msg.clone()));
-                                bail!(msg);
-                            }
+                        let failed = result.is_err();
+                        let _ = ack.send(result.map_err(|e| e.to_string()));
+                        if failed {
+                            bail!("failed to restart receive file");
                         }
                     }
-                    FileWriteCommand::Finish => {
-                        file.flush().await?;
-                        break;
-                    }
+                    FileWriteCommand::Finish => break,
                 }
             }
+            // Also drain and flush if the producer disappears during cancellation.
+            file.flush().await?;
             Ok(())
         });
 
@@ -892,17 +972,53 @@ impl RecvFile {
             tx,
             writer_handle: Some(writer_handle),
             progress: position,
+            budget: Arc::new(Semaphore::new(TRANSFER_QUEUE_BYTES)),
         })
     }
 
     async fn write(
         &mut self,
-        data: Vec<u8>,
+        data: Bytes,
     ) -> Result<()> {
-        let (ack_tx, ack_rx) = oneshot::channel();
-        self.tx.send(FileWriteCommand::Write(data, ack_tx)).await?;
-        self.progress = ack_rx.await.map_err(|_| anyhow!("writer task stopped"))?.map_err(anyhow::Error::msg)?;
+        if data.len() > TRANSFER_QUEUE_BYTES {
+            bail!("file data exceeds the receive queue budget");
+        }
+        let len = data.len() as u64;
+        let permit = self.budget.clone().acquire_many_owned(data.len() as u32).await?;
+        self.send_command(FileWriteCommand::Write(data, permit)).await?;
+        // UI progress counts accepted data; resume uses checkpoint() instead.
+        self.progress += len;
         Ok(())
+    }
+
+    async fn send_command(
+        &mut self,
+        command: FileWriteCommand,
+    ) -> Result<()> {
+        if self.tx.send(command).await.is_err() {
+            self.join_writer().await?;
+            bail!("writer task stopped");
+        }
+        Ok(())
+    }
+
+    async fn join_writer(&mut self) -> Result<()> {
+        if let Some(handle) = self.writer_handle.take() {
+            handle.await.map_err(|e| anyhow!("writer task failed: {e}"))??;
+        }
+        Ok(())
+    }
+
+    async fn checkpoint(&mut self) -> Result<u64> {
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.send_command(FileWriteCommand::Checkpoint(ack_tx)).await?;
+        match ack_rx.await {
+            Ok(result) => result.map_err(anyhow::Error::msg),
+            Err(_) => {
+                self.join_writer().await?;
+                bail!("writer task stopped");
+            }
+        }
     }
 
     async fn seek(
@@ -910,24 +1026,21 @@ impl RecvFile {
         position: u64,
     ) -> Result<()> {
         let (ack_tx, ack_rx) = oneshot::channel();
-        self.tx.send(FileWriteCommand::Seek(position, ack_tx)).await?;
+        self.send_command(FileWriteCommand::Seek(position, ack_tx)).await?;
         self.progress = ack_rx.await.map_err(|_| anyhow!("writer task stopped"))?.map_err(anyhow::Error::msg)?;
         Ok(())
     }
 
     async fn restart(&mut self) -> Result<()> {
         let (ack_tx, ack_rx) = oneshot::channel();
-        self.tx.send(FileWriteCommand::Restart(ack_tx)).await?;
+        self.send_command(FileWriteCommand::Restart(ack_tx)).await?;
         self.progress = ack_rx.await.map_err(|_| anyhow!("writer task stopped"))?.map_err(anyhow::Error::msg)?;
         Ok(())
     }
 
     async fn finish(&mut self) -> Result<()> {
-        self.tx.send(FileWriteCommand::Finish).await?;
-        if let Some(handle) = self.writer_handle.take() {
-            handle.await.map_err(|e| anyhow!("writer task failed: {e}"))??;
-        }
-        Ok(())
+        self.send_command(FileWriteCommand::Finish).await?;
+        self.join_writer().await
     }
 
     fn get_progress(&self) -> u64 {

@@ -118,6 +118,7 @@ message SendRequest {
   uint64 num_files = 2; // Number of files.
   uint64 num_folders = 3; // Number of folders.
   uint64 max_file_name_length = 4; // Maximum file name length.
+  uint32 file_request_window = 5; // Supported metadata lookahead; absent means one file.
 }
 
 // New file request.
@@ -153,6 +154,7 @@ message ReceiverUpdate {
     Confirm share_confirm = 1; // Share confirm.
     FileConfirm file_confirm = 2; // File confirm.
     ResumeState resume_state = 3; // Resume state after reconnection.
+    uint32 file_request_window = 4; // Negotiated lookahead, sent before share_confirm.
   }
 }
 

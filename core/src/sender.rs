@@ -1,26 +1,21 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     net::SocketAddr,
+    path::Path,
     pin::Pin,
     sync::{Arc, OnceLock},
     time::Duration,
 };
 
 use anyhow::{Result, bail};
-use bytes::{Bytes, BytesMut};
-use tokio::{
-    fs::File,
-    io::{AsyncReadExt, AsyncSeekExt, SeekFrom},
-    signal::ctrl_c,
-    sync::mpsc,
-};
+use tokio::{signal::ctrl_c, sync::mpsc};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::transport::Endpoint;
 
 use flash_cat_common::{
     Shutdown, compare_versions,
-    consts::{DEFAULT_RELAY_PORT, PUBLIC_RELAY, RELAY_CHANNEL_CAPACITY, SEND_BUFF_SIZE},
+    consts::{DEFAULT_RELAY_PORT, FILE_REQUEST_WINDOW, PUBLIC_RELAY, RELAY_CHANNEL_CAPACITY},
     crypt::encryptor::Encryptor,
     proto::{
         BreakPoint, Character, ClientType, Confirm, Done, FileConfirm, FileData, FileDone, Id, JoinRequest, NewFileRequest, RelayUpdate, SendRequest,
@@ -35,7 +30,10 @@ use flash_cat_common::{
 use flash_cat_relay::{built_info, relay::Relay};
 
 use crate::{
-    PING_INTERVAL, Progress, RelayType, SenderInteractionMessage, close_relay_session, close_relay_session_at, get_endpoint, normalize_relay_endpoint,
+    PING_INTERVAL, Progress, RelayType, SenderInteractionMessage,
+    chunks::{ChunkPool, FileChunks},
+    close_relay_session, close_relay_session_at, get_endpoint, normalize_relay_endpoint,
+    progress::ProgressThrottle,
     send_msg_to_relay,
 };
 
@@ -453,6 +451,7 @@ impl FlashCatSender {
         let mut send_task = None;
         let mut request_sent = false;
         let mut share_accepted = false;
+        let mut file_request_window = 1;
         loop {
             let message = tokio::select! {
                 _ = cancel.cancelled() => {
@@ -601,6 +600,7 @@ impl FlashCatSender {
                                     num_files: file_collector.num_files,
                                     num_folders: file_collector.num_folders,
                                     max_file_name_length: file_collector.max_file_name_length as u64,
+                                    file_request_window: FILE_REQUEST_WINDOW as u32,
                                 })),
                             }),
                         )
@@ -645,8 +645,17 @@ impl FlashCatSender {
                                             let notify_rx = confirm_rx.clone();
                                             let cancel = send_files_cancel.clone();
                                             send_task = Some(tokio::spawn(async move {
-                                                if let Err(err) =
-                                                    Self::send_files(encryptor, tx, file_collector, notify_rx, &sender_stream_tx, cancel, None).await
+                                                if let Err(err) = Self::send_files(
+                                                    encryptor,
+                                                    tx,
+                                                    file_collector,
+                                                    notify_rx,
+                                                    &sender_stream_tx,
+                                                    cancel,
+                                                    None,
+                                                    file_request_window,
+                                                )
+                                                .await
                                                 {
                                                     let _ = Self::send_msg_to_stream(
                                                         &sender_stream_tx,
@@ -667,6 +676,11 @@ impl FlashCatSender {
                                         SenderInteractionMessage::Error("try_from confirm failed".to_string()),
                                     )
                                     .await?;
+                                }
+                            }
+                            ReceiverMessage::FileRequestWindow(window) => {
+                                if !share_accepted {
+                                    file_request_window = (window as usize).clamp(1, FILE_REQUEST_WINDOW);
                                 }
                             }
                             ReceiverMessage::FileConfirm(file_confirm) => {
@@ -698,6 +712,7 @@ impl FlashCatSender {
                                         &sender_stream_tx,
                                         cancel,
                                         Some(resume_progress),
+                                        file_request_window,
                                     )
                                     .await
                                     {
@@ -751,28 +766,88 @@ impl FlashCatSender {
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
         cancel: CancellationToken,
         resume_progress: Option<HashMap<u64, (u64, bool)>>,
+        file_request_window: usize,
     ) -> Result<()> {
-        for send_file in file_collector.files.iter() {
-            if cancel.is_cancelled() {
-                return Ok(());
-            }
-
-            if let Some(ref progress) = resume_progress {
-                if let Some(&(_, completed)) = progress.get(&send_file.file_id) {
-                    if completed {
-                        continue;
+        let transfer = async {
+            let mut progress = ProgressThrottle::default();
+            let pool = ChunkPool::default();
+            let mut files = file_collector
+                .files
+                .iter()
+                .filter(|file| !resume_progress.as_ref().and_then(|p| p.get(&file.file_id)).is_some_and(|(_, completed)| *completed))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .peekable();
+            let window = file_request_window.clamp(1, FILE_REQUEST_WINDOW);
+            while let Some(first) = files.next() {
+                let mut batch = vec![first];
+                while batch.len() < window {
+                    let Some(next) = files.peek() else {
+                        break;
+                    };
+                    // Requests may open existing targets. Never pre-open the same
+                    // output path (or an ancestor) while an earlier file uses it.
+                    if batch.iter().any(|file| paths_overlap(&file.relative_path, &next.relative_path)) {
+                        break;
+                    }
+                    batch.push(files.next().unwrap());
+                }
+                let mut confirmations = FileConfirmations::default();
+                for file in &batch {
+                    if resume_progress.as_ref().and_then(|p| p.get(&file.file_id)).is_none() {
+                        confirmations.expected.insert(file.file_id);
+                        Self::request_file(file, &tx).await?;
                     }
                 }
+                for file in batch {
+                    let resume = resume_progress.as_ref().and_then(|p| p.get(&file.file_id).copied());
+                    Self::send_single_file(
+                        file,
+                        &encryptor,
+                        &tx,
+                        &notify,
+                        sender_stream_tx,
+                        &cancel,
+                        resume,
+                        &mut progress,
+                        &mut confirmations,
+                        &pool,
+                    )
+                    .await?;
+                }
             }
-
-            let file_resume = resume_progress.as_ref().and_then(|p| p.get(&send_file.file_id).copied());
-
-            Self::send_single_file(send_file, &encryptor, &tx, &notify, sender_stream_tx, &cancel, file_resume).await?;
+            send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
+            Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::SendDone).await?;
+            Ok(())
+        };
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Ok(()),
+            result = transfer => result,
         }
+    }
 
-        send_msg_to_relay(&tx, RelayMessage::Done(Done {})).await?;
-        Self::send_msg_to_stream(sender_stream_tx, SenderInteractionMessage::SendDone).await?;
-        Ok(())
+    async fn request_file(
+        send_file: &FileInfo,
+        tx: &mpsc::Sender<RelayUpdate>,
+    ) -> Result<()> {
+        send_msg_to_relay(
+            tx,
+            RelayMessage::Sender(SenderUpdate {
+                sender_message: Some(SenderMessage::NewFileRequest(NewFileRequest {
+                    file_id: send_file.file_id,
+                    filename: send_file.name.clone(),
+                    #[cfg(unix)]
+                    file_mode: send_file.mode,
+                    #[cfg(windows)]
+                    file_mode: 0,
+                    relative_path: send_file.relative_path.clone(),
+                    total_size: send_file.size,
+                    is_empty_dir: send_file.empty_dir,
+                })),
+            }),
+        )
+        .await
     }
 
     async fn send_single_file(
@@ -783,6 +858,9 @@ impl FlashCatSender {
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
         cancel: &CancellationToken,
         file_resume: Option<(u64, bool)>,
+        progress: &mut ProgressThrottle,
+        confirmations: &mut FileConfirmations,
+        pool: &ChunkPool,
     ) -> Result<()> {
         // Resume: partial file — send BreakPoint and stream remaining data
         if let Some((received_bytes, _)) = file_resume {
@@ -804,44 +882,28 @@ impl FlashCatSender {
                 )
                 .await?;
 
-                Self::stream_file_data(send_file, encryptor, tx, sender_stream_tx, cancel, received_bytes).await?;
+                Self::stream_file_data(
+                    send_file,
+                    encryptor,
+                    tx,
+                    sender_stream_tx,
+                    cancel,
+                    received_bytes,
+                    progress,
+                    pool,
+                )
+                .await?;
                 return Ok(());
             }
         }
 
-        // Normal flow: send NewFileRequest, wait for confirm, then stream data
-        send_msg_to_relay(
-            tx,
-            RelayMessage::Sender(SenderUpdate {
-                sender_message: Some(SenderMessage::NewFileRequest(NewFileRequest {
-                    file_id: send_file.file_id,
-                    filename: send_file.name.clone(),
-                    #[cfg(unix)]
-                    file_mode: send_file.mode,
-                    #[cfg(windows)]
-                    file_mode: 0,
-                    relative_path: send_file.relative_path.clone(),
-                    total_size: send_file.size,
-                    is_empty_dir: send_file.empty_dir,
-                })),
-            }),
-        )
-        .await?;
-
-        let file_confirm = tokio::select! {
-            _ = cancel.cancelled() => return Ok(()),
-            result = tokio::time::timeout(FILE_CONFIRM_TIMEOUT, notify.recv()) => {
-                result
-                    .map_err(|_| {
-                        anyhow::anyhow!(
-                            "timed out waiting for receiver confirmation for file {} after {}s",
-                            send_file.file_id,
-                            FILE_CONFIRM_TIMEOUT.as_secs()
-                        )
-                    })?
-                    .map_err(|_| anyhow::anyhow!("confirm channel closed for file {}", send_file.file_id))?
-            }
-        };
+        let file_confirm = tokio::time::timeout(FILE_CONFIRM_TIMEOUT, confirmations.wait(send_file.file_id, notify)).await.map_err(|_| {
+            anyhow::anyhow!(
+                "timed out waiting for receiver confirmation for file {} after {}s",
+                send_file.file_id,
+                FILE_CONFIRM_TIMEOUT.as_secs()
+            )
+        })??;
 
         let mut position = 0;
 
@@ -895,7 +957,7 @@ impl FlashCatSender {
             return Ok(());
         }
 
-        Self::stream_file_data(send_file, encryptor, tx, sender_stream_tx, cancel, position).await
+        Self::stream_file_data(send_file, encryptor, tx, sender_stream_tx, cancel, position, progress, pool).await
     }
 
     async fn stream_file_data(
@@ -905,21 +967,23 @@ impl FlashCatSender {
         sender_stream_tx: &mpsc::Sender<SenderInteractionMessage>,
         cancel: &CancellationToken,
         start_position: u64,
+        progress: &mut ProgressThrottle,
+        pool: &ChunkPool,
     ) -> Result<()> {
-        let mut read_file = File::open(send_file.access_path.as_str()).await?;
-        read_file.seek(SeekFrom::Start(start_position)).await?;
+        let mut chunks = FileChunks::new(
+            send_file.access_path.clone(),
+            start_position,
+            send_file.size.saturating_sub(start_position),
+            pool.clone(),
+        );
         let mut position = start_position;
-        let mut buffer = BytesMut::with_capacity(SEND_BUFF_SIZE);
         loop {
-            if cancel.is_cancelled() {
-                return Ok(());
-            }
-            buffer.clear();
-            let read_length = tokio::select! {
+            let chunk = tokio::select! {
+                biased;
                 _ = cancel.cancelled() => return Ok(()),
-                result = read_file.read_buf(&mut buffer) => result?,
+                result = chunks.next() => result?,
             };
-            if read_length == 0 {
+            let Some(mut chunk) = chunk else {
                 send_msg_to_relay(
                     tx,
                     RelayMessage::Sender(SenderUpdate {
@@ -931,30 +995,39 @@ impl FlashCatSender {
                 .await?;
                 Self::send_msg_to_stream(
                     sender_stream_tx,
+                    SenderInteractionMessage::FileProgress(Progress {
+                        file_id: send_file.file_id,
+                        position,
+                    }),
+                )
+                .await?;
+                Self::send_msg_to_stream(
+                    sender_stream_tx,
                     SenderInteractionMessage::FileProgressFinish(send_file.file_id),
                 )
                 .await?;
                 return Ok(());
-            }
+            };
+            let read_length = chunk.data.len();
+            encryptor.encrypt_in_place(&mut chunk.data)?;
             send_msg_to_relay(
                 tx,
                 RelayMessage::Sender(SenderUpdate {
                     sender_message: Some(SenderMessage::FileData(FileData {
                         file_id: send_file.file_id,
-                        data: Bytes::from(encryptor.encrypt(buffer.as_ref())?),
+                        data: chunk.into_bytes(),
                     })),
                 }),
             )
             .await?;
             position += read_length as u64;
-            Self::send_msg_to_stream(
+            progress.report(
                 sender_stream_tx,
                 SenderInteractionMessage::FileProgress(Progress {
                     file_id: send_file.file_id,
                     position,
                 }),
-            )
-            .await?;
+            )?;
         }
     }
 
@@ -1049,5 +1122,53 @@ impl FlashCatSender {
     ) -> Result<()> {
         tx.send(msg).await?;
         Ok(())
+    }
+}
+
+/// Normalize components for collision checks without resolving sender-side paths.
+fn paths_overlap(
+    left: &str,
+    right: &str,
+) -> bool {
+    // Also be conservative for transfers to case-insensitive receivers.
+    let left = left.replace('\\', "/").to_lowercase();
+    let right = right.replace('\\', "/").to_lowercase();
+    let left = Path::new(&left);
+    let right = Path::new(&right);
+    left.starts_with(right) || right.starts_with(left)
+}
+
+#[derive(Default)]
+struct FileConfirmations {
+    expected: HashSet<u64>,
+    buffered: HashMap<u64, FileConfirm>,
+}
+
+impl FileConfirmations {
+    async fn wait(
+        &mut self,
+        file_id: u64,
+        notify: &async_channel::Receiver<FileConfirm>,
+    ) -> Result<FileConfirm> {
+        if let Some(confirm) = self.buffered.remove(&file_id) {
+            self.expected.remove(&file_id);
+            return Ok(confirm);
+        }
+        loop {
+            let confirm = notify.recv().await.map_err(|_| anyhow::anyhow!("confirm channel closed for file {file_id}"))?;
+            let id = match &confirm.confirm_message {
+                Some(ConfirmMessage::NewFileConfirm(msg)) => msg.file_id,
+                Some(ConfirmMessage::BreakPointConfirm(msg)) => msg.file_id,
+                None => bail!("empty file confirmation"),
+            };
+            if !self.expected.contains(&id) {
+                bail!("unexpected confirmation for file {id}");
+            }
+            if id == file_id {
+                self.expected.remove(&file_id);
+                return Ok(confirm);
+            }
+            self.buffered.insert(id, confirm);
+        }
     }
 }

@@ -18,11 +18,14 @@ pub const DEFAULT_HTTP2_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 /// The default tcp keepalive.
 pub const DEFAULT_TCP_KEEPALIVE: Duration = Duration::from_secs(30);
 
-/// Send buffer size: 64 KiB.
-pub const SEND_BUFF_SIZE: usize = 64 * 1024;
+/// Send chunk size: 256 KiB, below the default gRPC message size limit.
+pub const SEND_BUFF_SIZE: usize = 256 * 1024;
+
+/// Payload budget per transport queue and per active receive writer.
+pub const TRANSFER_QUEUE_BYTES: usize = 4 * 1024 * 1024;
 
 /// Capacity of each relay transport channel.
-pub const RELAY_CHANNEL_CAPACITY: usize = 64;
+pub const RELAY_CHANNEL_CAPACITY: usize = TRANSFER_QUEUE_BYTES / SEND_BUFF_SIZE;
 
 /// Max reconnect retries.
 pub const MAX_RECONNECT_RETRIES: u32 = 5;
@@ -38,3 +41,6 @@ pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Initial HTTP/2 connection and stream window size (16MiB).
 pub const INITIAL_WINDOW_SIZE: u32 = 16 * 1024 * 1024;
+
+/// Maximum number of files whose metadata may be awaiting confirmation.
+pub const FILE_REQUEST_WINDOW: usize = 8;
