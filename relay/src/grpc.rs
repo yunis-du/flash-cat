@@ -231,7 +231,7 @@ type RelayTx = mpsc::Sender<Result<RelayUpdate, Status>>;
 async fn handle_streaming(
     tx: &RelayTx,
     session: &Session,
-    mut stream: Streaming<RelayUpdate>,
+    mut stream: impl tokio_stream::Stream<Item = Result<RelayUpdate, Status>> + Unpin,
     character: Character,
     connection: &ConnectionLease,
 ) -> Result<(), &'static str> {
@@ -239,39 +239,33 @@ async fn handle_streaming(
         Character::Sender => (session.recipient_update_tx(), session.sharer_update_rx()),
         Character::Receiver => (session.sharer_update_tx(), session.recipient_update_rx()),
     };
-    loop {
-        tokio::select! {
-            biased;
-            _ = connection.superseded() => return Ok(()),
-            _ = session.terminated() => {
-                send_msg(tx, RelayMessage::Terminated(Terminated {})).await;
-                return Ok(());
-            }
-            // Send buffered server updates to the client.
-            Ok(msg) = update_rx.recv() => {
-                tokio::select! {
-                    biased;
-                    _ = connection.superseded() => return Ok(()),
-                    _ = session.terminated() => return Ok(()),
-                    sent = send_msg(tx, msg) => {
-                        if !sent {
-                            return Err("failed to send update message");
-                        }
-                    }
-                }
-            }
-            // Handle incoming client messages.
-            maybe_update = stream.next() => {
-                if let Some(Ok(update)) = maybe_update {
-                    if !handle_update(tx, session, update, update_tx, connection).await {
-                        return Err("error responding to client update");
-                    }
-                } else {
-                    // The client has hung up on their end.
-                    return Ok(());
-                }
+    // Backpressure in one direction must not stop the other direction. In
+    // particular, a busy download must not starve incoming save acknowledgements.
+    let outgoing = async {
+        while let Ok(msg) = update_rx.recv().await {
+            if !send_msg(tx, msg).await {
+                return Err("failed to send update message");
             }
         }
+        Ok(())
+    };
+    let incoming = async {
+        while let Some(Ok(update)) = stream.next().await {
+            if !handle_update(tx, session, update, update_tx, connection).await {
+                return Err("error responding to client update");
+            }
+        }
+        Ok(())
+    };
+    tokio::select! {
+        biased;
+        _ = connection.superseded() => Ok(()),
+        _ = session.terminated() => {
+            send_msg(tx, RelayMessage::Terminated(Terminated {})).await;
+            Ok(())
+        }
+        result = incoming => result,
+        result = outgoing => result,
     }
 }
 
@@ -353,4 +347,88 @@ async fn send_err(
     err: String,
 ) -> bool {
     send_msg(tx, RelayMessage::Error(err)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flash_cat_common::proto::{FileResult, FileStatus, ReceiverUpdate, receiver_update::ReceiverMessage};
+
+    fn saved() -> RelayMessage {
+        RelayMessage::Receiver(ReceiverUpdate {
+            receiver_message: Some(ReceiverMessage::FileResult(FileResult {
+                file_id: 42,
+                status: FileStatus::Success as i32,
+                error: String::new(),
+            })),
+        })
+    }
+
+    async fn assert_ack_flows_while_data_is_blocked(character: Character) {
+        let session = Arc::new(Session::new(Metadata {
+            encrypted_share_code: Default::default(),
+            sender_local_relay: None,
+        }));
+        let connection = session.register_connection(character).await;
+        let (tx, mut rx) = mpsc::channel(1);
+        let (input_tx, input_rx) = mpsc::channel(1);
+        // Block the data direction without draining it during the assertion.
+        match character {
+            Character::Receiver => {
+                tx.send(Ok(RelayUpdate {
+                    relay_message: Some(RelayMessage::Ping(1)),
+                }))
+                .await
+                .unwrap();
+                session.send_to_recipient(RelayMessage::Ping(2)).await.unwrap();
+            }
+            Character::Sender => {
+                for _ in 0..RELAY_CHANNEL_CAPACITY {
+                    session.send_to_recipient(RelayMessage::Ping(1)).await.unwrap();
+                }
+                input_tx
+                    .send(Ok(RelayUpdate {
+                        relay_message: Some(RelayMessage::Ready(Ready {
+                            local_relay: true,
+                        })),
+                    }))
+                    .await
+                    .unwrap();
+            }
+        }
+        let task_session = session.clone();
+        let task = tokio::spawn(async move { handle_streaming(&tx, &task_session, ReceiverStream::new(input_rx), character, &connection).await });
+        tokio::task::yield_now().await;
+        let result = tokio::time::timeout(Duration::from_secs(1), async {
+            match character {
+                Character::Receiver => {
+                    input_tx
+                        .send(Ok(RelayUpdate {
+                            relay_message: Some(saved()),
+                        }))
+                        .await
+                        .unwrap();
+                    session.recv_from_share().await.unwrap()
+                }
+                Character::Sender => {
+                    session.send_to_share(saved()).await.unwrap();
+                    rx.recv().await.unwrap().unwrap().relay_message.unwrap()
+                }
+            }
+        })
+        .await;
+        task.abort();
+        let _ = task.await;
+        assert_eq!(result.expect("save acknowledgement blocked behind file data"), saved());
+    }
+
+    #[tokio::test]
+    async fn receiver_can_report_saved_file_while_download_is_backpressured() {
+        assert_ack_flows_while_data_is_blocked(Character::Receiver).await;
+    }
+
+    #[tokio::test]
+    async fn sender_gets_saved_file_result_while_upload_is_backpressured() {
+        assert_ack_flows_while_data_is_blocked(Character::Sender).await;
+    }
 }
