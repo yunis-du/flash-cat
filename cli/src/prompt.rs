@@ -50,7 +50,7 @@ async fn confirm_inner(
 ) -> Result<bool> {
     let mut hint = "";
     loop {
-        let value = line(format!("{hint}{prompt} (y/n) "), transient).await?;
+        let value = line(format!("{hint}{prompt} (Y/n) "), transient).await?;
         match value.as_str() {
             "" => continue,
             "y" | "yes" => return Ok(true),
