@@ -9,7 +9,9 @@ async fn line(
     transient: bool,
 ) -> Result<String> {
     if !io::stdin().is_terminal() {
-        bail!("Interactive confirmation requires a terminal. Use -y for unattended receiving.");
+        bail!(
+            "Interactive confirmation requires a terminal. Use -y to accept receiving and keep both conflicting files; resume confirmation still requires a terminal."
+        );
     }
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {

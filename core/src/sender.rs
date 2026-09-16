@@ -1284,13 +1284,13 @@ async fn resume_position(
     if let Some(proof) = proof {
         validate_source(file).await?;
         let actual = prefix_digest(tokio::fs::File::open(&file.access_path).await?, position).await?;
-        if proof != actual {
-            bail!(
-                "Cannot resume {}: existing content differs from the source. Receive again and choose restart.",
-                file.name
-            );
-        }
         validate_source(file).await?;
+        if proof != actual {
+            // A smaller destination may be an older, unrelated file rather than
+            // a saved prefix. BreakPoint(0) makes the receiver truncate and seek
+            // before accepting data, without aborting the remaining files.
+            return Ok(0);
+        }
     }
     Ok(position)
 }

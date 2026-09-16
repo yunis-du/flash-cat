@@ -71,7 +71,7 @@ struct RecvCmd {
     #[clap(short = 'o', long)]
     output: Option<String>,
 
-    /// Automatically answer yes for all questions
+    /// Automatically accept receiving and keep both conflicting files; resume still requires confirmation
     #[clap(short = 'y', long)]
     assumeyes: bool,
 

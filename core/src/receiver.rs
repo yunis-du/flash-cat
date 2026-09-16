@@ -671,6 +671,16 @@ impl FlashCatReceiver {
                                 let state = file_states.get_mut(&break_point.file_id).ok_or_else(|| anyhow!("receive file failed"))?;
                                 let recv_file = state.file.as_mut().ok_or_else(|| anyhow!("receive file is not open"))?;
                                 if break_point.position == 0 {
+                                    if state.resume_proof.is_some() && state.received_bytes > 0 {
+                                        let path = state.destination.as_ref().ok_or_else(|| anyhow!("missing destination file"))?.target.display();
+                                        Self::send_msg_to_stream(
+                                            receiver_stream_tx,
+                                            ReceiverInteractionMessage::Message(format!(
+                                                "Existing content differs from the source; restarting {path} from zero."
+                                            )),
+                                        )
+                                        .await?;
+                                    }
                                     recv_file.restart().await?;
                                 } else {
                                     if break_point.position > recv_file.checkpoint().await? {

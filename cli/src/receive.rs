@@ -149,12 +149,12 @@ impl Receive {
                         progress.add_progress(recv_new_file.filename.as_str(), recv_new_file.file_id, recv_new_file.size);
                     }
                     ReceiverInteractionMessage::BreakPoint(file) => {
-                        let resume = if self.assumeyes {
-                            true
-                        } else {
+                        // Resuming existing content requires its own confirmation,
+                        // even when -y accepts the transfer and keeps both conflicting files.
+                        let resume = {
                             let _display = progress.pause_for_prompt();
                             prompt::confirm_transient(&format!(
-                                "File '{}' is {:.2}% complete. Resume transfer? (n restarts from zero)",
+                                "File '{}' exists ({:.2}% of source size). Try resuming? (content mismatch or n restarts from zero)",
                                 file.filename, file.percent,
                             ))
                             .await?
@@ -214,7 +214,7 @@ impl Receive {
         progress: &Progress,
     ) -> Result<ExistingAction> {
         if self.assumeyes {
-            return Ok(ExistingAction::Overwrite);
+            return Ok(ExistingAction::Rename);
         }
         if let Some(action) = *remembered {
             return Ok(action);
