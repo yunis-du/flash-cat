@@ -132,5 +132,3 @@ Share code is: xx-xxxx-xxxx
 ...
 ```
 The receiver does not read `FLASH_CAT_RELAY`. To receive through a private relay, pass `--relay` explicitly.
-
-Receiving writes directly to the destination, without `.meta` or `.part` files. Conflicts require choosing keep both, overwrite, or skip; overwrite truncates the original before receiving. Exiting mid-transfer leaves partial content in the destination. On a new run, a nonempty destination smaller than the source offers resume. Both clients verify the saved prefix with SHA-256 before transferring the remaining bytes. A mismatch stops the transfer without modifying the existing content. Equal-sized or larger destinations still use conflict handling. Success is reported only after checking the expected length and syncing the file.
