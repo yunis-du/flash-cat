@@ -32,7 +32,7 @@ pub enum SenderInteractionMessage {
     TransferMode(RelayType),
     ReceiverReject,
     RelayFailed((RelayType, String)),
-    FileStage(FileStage),
+    FileStarted(Progress),
     FileProgress(Progress),
     FileResult(FileResult),
     OtherClose,
@@ -51,7 +51,7 @@ pub enum ReceiverInteractionMessage {
     FileRenamed((u64, String)),
     RecvNewFile(RecvNewFile),
     BreakPoint(BreakPoint),
-    FileStage(FileStage),
+    FileStarted(Progress),
     FileProgress(Progress),
     FileResult(FileResult),
     OtherClose,
@@ -74,21 +74,6 @@ impl RelayType {
             RelayType::Specify => "Specify".to_string(),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransferPhase {
-    Preparing,
-    Waiting,
-    Transferring,
-    Saving,
-}
-
-#[derive(Debug, Clone)]
-pub struct FileStage {
-    pub file_id: u64,
-    pub phase: TransferPhase,
-    pub position: u64,
 }
 
 #[derive(Debug, Clone)]

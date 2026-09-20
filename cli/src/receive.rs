@@ -167,9 +167,9 @@ impl Receive {
                         }
                         self.receiver.send_confirm(ReceiverConfirm::BreakPointConfirm((resume, file.file_id, file.position))).await?;
                     }
-                    ReceiverInteractionMessage::FileStage(stage) => {
-                        verifying.finish(stage.file_id);
-                        progress.set_stage(stage);
+                    ReceiverInteractionMessage::FileStarted(start) => {
+                        verifying.finish(start.file_id);
+                        progress.start_file(start.file_id, start.position);
                     }
                     ReceiverInteractionMessage::FileProgress(fp) => {
                         progress.set_position(fp.file_id, fp.position);

@@ -147,7 +147,7 @@ fn unused_name(path: &Path) -> Result<PathBuf> {
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let extension = path.extension().map(|s| format!(".{}", s.to_string_lossy())).unwrap_or_default();
     for number in 1..10000 {
-        let candidate = path.with_file_name(format!("{stem}({number}){extension}"));
+        let candidate = path.with_file_name(format!("{stem}_{number}{extension}"));
         if !candidate.try_exists()? {
             return Ok(candidate);
         }

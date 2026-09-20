@@ -355,9 +355,9 @@ impl Render for ReceiveView {
                                                         }
                                                         view.send_confirm(ReceiverConfirm::BreakPointConfirm((true, bp.file_id, bp.position)));
                                                     }
-                                                    ReceiverInteractionMessage::FileStage(stage) => {
-                                                        if let Some(pb) = view.progress_mut(stage.file_id) {
-                                                            pb.set_stage(stage.phase, stage.position);
+                                                    ReceiverInteractionMessage::FileStarted(start) => {
+                                                        if let Some(pb) = view.progress_mut(start.file_id) {
+                                                            pb.start(start.position);
                                                         }
                                                     }
                                                     ReceiverInteractionMessage::FileProgress(progress) => {

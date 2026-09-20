@@ -1,4 +1,3 @@
-use crate::{FileStage, TransferPhase};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::SocketAddr,
@@ -971,15 +970,6 @@ impl FlashCatSender {
             }
         }
 
-        Self::send_msg_to_stream(
-            sender_stream_tx,
-            SenderInteractionMessage::FileStage(FileStage {
-                file_id: send_file.file_id,
-                phase: TransferPhase::Waiting,
-                position: 0,
-            }),
-        )
-        .await?;
         let file_confirm = tokio::time::timeout(FILE_CONFIRM_TIMEOUT, confirmations.wait(send_file.file_id, notify)).await.map_err(|_| {
             anyhow::anyhow!(
                 "timed out waiting for receiver confirmation for file {} after {}s",
@@ -1051,9 +1041,8 @@ impl FlashCatSender {
         validate_source(send_file).await?;
         Self::send_msg_to_stream(
             sender_stream_tx,
-            SenderInteractionMessage::FileStage(FileStage {
+            SenderInteractionMessage::FileStarted(Progress {
                 file_id: send_file.file_id,
-                phase: TransferPhase::Transferring,
                 position: start_position,
             }),
         )
@@ -1089,15 +1078,6 @@ impl FlashCatSender {
                     sender_stream_tx,
                     SenderInteractionMessage::FileProgress(Progress {
                         file_id: send_file.file_id,
-                        position,
-                    }),
-                )
-                .await?;
-                Self::send_msg_to_stream(
-                    sender_stream_tx,
-                    SenderInteractionMessage::FileStage(FileStage {
-                        file_id: send_file.file_id,
-                        phase: TransferPhase::Saving,
                         position,
                     }),
                 )

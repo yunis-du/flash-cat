@@ -1,6 +1,5 @@
 use crate::helpers::i18n_common;
 use flash_cat_common::utils::{human_bytes, human_duration};
-use flash_cat_core::TransferPhase;
 use gpui_kit::component::{h_flex, label::Label, progress::Progress, v_flex};
 use gpui_kit::{App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
 use std::time::{Duration, Instant};
@@ -12,7 +11,6 @@ pub struct ProgressBar {
     file_size: u64,
     current_progress: u64,
     baseline: u64,
-    phase: TransferPhase,
     skip: bool,
     error: Option<String>,
     started_at: Option<Instant>,
@@ -30,7 +28,6 @@ impl ProgressBar {
             file_size,
             current_progress: 0,
             baseline: 0,
-            phase: TransferPhase::Waiting,
             skip: false,
             error: None,
             started_at: None,
@@ -40,20 +37,16 @@ impl ProgressBar {
     fn terminal(&self) -> bool {
         self.skip || self.error.is_some() || self.finished_elapsed.is_some()
     }
-    pub fn set_stage(
+    pub fn start(
         &mut self,
-        phase: TransferPhase,
         position: u64,
     ) {
         if self.terminal() {
             return;
         }
-        self.phase = phase;
         self.current_progress = position.min(self.file_size);
-        if phase == TransferPhase::Transferring {
-            self.baseline = position;
-            self.started_at = Some(Instant::now());
-        }
+        self.baseline = self.current_progress;
+        self.started_at = Some(Instant::now());
     }
     pub fn set_progress(
         &mut self,
@@ -101,33 +94,28 @@ impl RenderOnce for ProgressBar {
                 human_bytes(self.file_size),
                 human_duration(elapsed)
             )
+        } else if self.started_at.is_none() {
+            i18n_common(cx, "waiting_receiver").to_string()
         } else {
-            match self.phase {
-                TransferPhase::Preparing => i18n_common(cx, "preparing_file").to_string(),
-                TransferPhase::Waiting => i18n_common(cx, "waiting_receiver").to_string(),
-                TransferPhase::Saving => i18n_common(cx, "saving").to_string(),
-                TransferPhase::Transferring => {
-                    let seconds = self.started_at.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
-                    let speed = if seconds > 0.0 {
-                        self.current_progress.saturating_sub(self.baseline) as f64 / seconds
-                    } else {
-                        0.0
-                    };
-                    let eta = if speed > 0.0 && seconds >= 0.2 {
-                        human_duration(Duration::from_secs_f64(
-                            ((self.file_size - self.current_progress) as f64 / speed).min(315360000.0),
-                        ))
-                    } else {
-                        "—".to_owned()
-                    };
-                    format!(
-                        "{}/{} • {}/s • ETA {eta}",
-                        human_bytes(self.current_progress),
-                        human_bytes(self.file_size),
-                        human_bytes(speed as u64)
-                    )
-                }
-            }
+            let seconds = self.started_at.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
+            let speed = if seconds > 0.0 {
+                self.current_progress.saturating_sub(self.baseline) as f64 / seconds
+            } else {
+                0.0
+            };
+            let eta = if speed > 0.0 && seconds >= 0.2 {
+                human_duration(Duration::from_secs_f64(
+                    ((self.file_size - self.current_progress) as f64 / speed).min(315360000.0),
+                ))
+            } else {
+                "—".to_owned()
+            };
+            format!(
+                "{}/{} • {}/s • ETA {eta}",
+                human_bytes(self.current_progress),
+                human_bytes(self.file_size),
+                human_bytes(speed as u64)
+            )
         };
         v_flex().w_full().child(Label::new(self.file_name).text_sm().truncate()).child(
             h_flex()

@@ -1,4 +1,3 @@
-use crate::{FileStage, TransferPhase};
 use std::{
     collections::{HashMap, VecDeque},
     net::SocketAddr,
@@ -693,9 +692,8 @@ impl FlashCatReceiver {
                                 state.started = true;
                                 Self::send_msg_to_stream(
                                     receiver_stream_tx,
-                                    ReceiverInteractionMessage::FileStage(FileStage {
+                                    ReceiverInteractionMessage::FileStarted(Progress {
                                         file_id: break_point.file_id,
-                                        phase: TransferPhase::Transferring,
                                         position: break_point.position,
                                     }),
                                 )
@@ -706,9 +704,8 @@ impl FlashCatReceiver {
                                 if !state.started {
                                     Self::send_msg_to_stream(
                                         receiver_stream_tx,
-                                        ReceiverInteractionMessage::FileStage(FileStage {
+                                        ReceiverInteractionMessage::FileStarted(Progress {
                                             file_id: file_data.file_id,
-                                            phase: TransferPhase::Transferring,
                                             position: state.received_bytes,
                                         }),
                                     )
@@ -740,9 +737,8 @@ impl FlashCatReceiver {
                                 let state = file_states.get_mut(&file_done.file_id).ok_or_else(|| anyhow!("receive file failed"))?;
                                 Self::send_msg_to_stream(
                                     receiver_stream_tx,
-                                    ReceiverInteractionMessage::FileStage(FileStage {
+                                    ReceiverInteractionMessage::FileProgress(Progress {
                                         file_id: file_done.file_id,
-                                        phase: TransferPhase::Saving,
                                         position: state.received_bytes,
                                     }),
                                 )

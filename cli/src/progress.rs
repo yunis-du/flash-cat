@@ -1,13 +1,30 @@
-use flash_cat_common::format::HumanDuration;
-use flash_cat_core::{FileStage, RelayType, TransferPhase};
-use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use std::{
-    borrow::Cow,
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use flash_cat_core::RelayType;
+use indicatif::{HumanBytes, HumanDuration, MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use std::{borrow::Cow, collections::HashMap, time::Duration};
 
 const REFRESH: Duration = Duration::from_millis(80);
+
+// Supporting terminals (including iTerm2) present the complete update at once,
+// rather than displaying indicatif's intermediate clear-and-redraw operations.
+struct SynchronizedUpdate(Option<console::Term>);
+
+impl SynchronizedUpdate {
+    fn new(multi: &MultiProgress) -> Self {
+        let term = (!multi.is_hidden()).then(console::Term::stderr);
+        if let Some(term) = &term {
+            let _ = term.write_str("\x1b[?2026h");
+        }
+        Self(term)
+    }
+}
+
+impl Drop for SynchronizedUpdate {
+    fn drop(&mut self) {
+        if let Some(term) = &self.0 {
+            let _ = term.write_str("\x1b[?2026l");
+        }
+    }
+}
 
 /// Keep terminal redraws out of an interactive prompt without holding a drawing
 /// lock while waiting for input. Dropping the prompt future also restores output.
@@ -28,8 +45,6 @@ struct FileProgress {
     name: String,
     size: u64,
     position: u64,
-    baseline: u64,
-    started: Option<Instant>,
     terminal: bool,
 }
 pub struct Progress {
@@ -37,8 +52,8 @@ pub struct Progress {
     name_width: usize,
     total_size: u64,
     processed: u64,
-    transferred: u64,
-    transfer_started: Option<Instant>,
+    // A hidden indicatif estimator counts only bytes transferred this run.
+    transfer_progress: ProgressBar,
     finished: u64,
     multi: MultiProgress,
     total: Option<ProgressBar>,
@@ -48,10 +63,12 @@ pub struct Progress {
 
 impl Drop for Progress {
     fn drop(&mut self) {
+        let _update = SynchronizedUpdate::new(&self.multi);
         // Keep the last positions visible when an error or cancellation drops
         // the transfer future. Finishing would incorrectly fill the bars to 100%.
         for bar in self.bars.values() {
             bar.disable_steady_tick();
+            bar.set_style(file_style(false));
             bar.abandon_with_message("Interrupted");
         }
         if let Some(total) = &self.total {
@@ -81,8 +98,7 @@ impl Progress {
             name_width: name_len.min(48),
             total_size,
             processed: 0,
-            transferred: 0,
-            transfer_started: None,
+            transfer_progress: ProgressBar::hidden(),
             finished: 0,
             multi: MultiProgress::new(),
             total: None,
@@ -119,8 +135,6 @@ impl Progress {
             name: name.to_owned(),
             size,
             position: 0,
-            baseline: 0,
-            started: None,
             terminal: false,
         });
     }
@@ -130,6 +144,7 @@ impl Progress {
         id: u64,
         size: u64,
     ) {
+        let _update = SynchronizedUpdate::new(&self.multi);
         self.register_file(name, id, size);
         self.ensure_bar(id);
     }
@@ -154,11 +169,7 @@ impl Progress {
         if let Some(file) = self.files.get(&id) {
             let name = format!("{:<width$}", truncate(&file.name, 48), width = self.name_width);
             let bar = ProgressBar::new(file.size).with_prefix(name).with_message("Waiting");
-            bar.set_style(
-                ProgressStyle::with_template("{spinner:.green} {prefix:.bold.green} [{bar:50.cyan/blue}] {bytes}/{total_bytes} • {msg}")
-                    .unwrap()
-                    .progress_chars("#>-"),
-            );
+            bar.set_style(file_style(false));
             let bar = match &self.total {
                 Some(total) => self.multi.insert_before(total, bar),
                 None => self.multi.add(bar),
@@ -166,102 +177,67 @@ impl Progress {
             self.bars.insert(id, bar);
         }
     }
-    pub fn set_stage(
+    pub fn start_file(
         &mut self,
-        stage: FileStage,
+        id: u64,
+        position: u64,
     ) {
-        if self.files.get(&stage.file_id).is_none_or(|f| f.terminal) {
+        let Some(file) = self.files.get(&id).filter(|file| !file.terminal) else {
             return;
+        };
+        let position = position.min(file.size);
+        let _update = SynchronizedUpdate::new(&self.multi);
+        self.ensure_bar(id);
+        if self.transfer_progress.position() == 0 {
+            self.transfer_progress.reset_elapsed();
         }
-        self.ensure_bar(stage.file_id);
-        if stage.phase == TransferPhase::Transferring {
-            self.transfer_started.get_or_insert_with(Instant::now);
-            if let Some(file) = self.files.get_mut(&stage.file_id) {
-                self.processed = self.processed.saturating_sub(file.position).saturating_add(stage.position);
-                file.position = stage.position;
-                file.baseline = stage.position;
-                file.started = Some(Instant::now());
-            }
-        } else if stage.phase == TransferPhase::Saving {
-            self.set_position(stage.file_id, stage.position);
-        }
-        if let Some(bar) = self.bars.get(&stage.file_id) {
-            bar.set_position(stage.position);
-            bar.set_message(match stage.phase {
-                TransferPhase::Preparing => "Preparing file",
-                TransferPhase::Waiting => "Waiting for receiver",
-                TransferPhase::Transferring => "Transferring • ETA —",
-                TransferPhase::Saving => "Saving at receiver",
-            });
-        }
+        let file = self.files.get_mut(&id).unwrap();
+        self.processed = self.processed.saturating_sub(file.position).saturating_add(position);
+        file.position = position;
+        let bar = &self.bars[&id];
+        // Seed and reset the estimator so resumed bytes do not count as speed.
+        bar.set_style(file_style(false));
+        bar.clone().with_position(position).with_message("Transferring").tick();
+        bar.reset_elapsed();
+        bar.set_style(file_style(true));
+        bar.tick();
         self.update_total();
-        self.draw(stage.file_id);
     }
+
     pub fn set_position(
         &mut self,
         id: u64,
         position: u64,
     ) {
+        let _update = SynchronizedUpdate::new(&self.multi);
         self.ensure_bar(id);
         if let Some(file) = self.files.get_mut(&id) {
             if file.terminal {
                 return;
             }
             let position = position.min(file.size);
-            self.transferred += position.saturating_sub(file.position);
+            self.transfer_progress.inc(position.saturating_sub(file.position));
             self.processed = self.processed.saturating_sub(file.position).saturating_add(position);
             file.position = position;
             if let Some(bar) = self.bars.get(&id) {
                 bar.set_position(position);
-                let elapsed = file.started.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
-                let bytes = position.saturating_sub(file.baseline);
-                let speed = if elapsed > 0.0 {
-                    bytes as f64 / elapsed
-                } else {
-                    0.0
-                };
-                let eta = if elapsed >= 0.2 && speed > 0.0 {
-                    format!(
-                        "{:#}",
-                        HumanDuration(Duration::from_secs_f64(
-                            ((file.size - position) as f64 / speed).min(315360000.0)
-                        ))
-                    )
-                } else {
-                    "—".into()
-                };
-                bar.set_message(format!("{}/s • ETA {eta}", HumanBytes(speed as u64)));
             }
         }
         self.update_total();
-        self.draw(id);
     }
-    // Core throttles intermediate progress events. Render the complete state
-    // once at the end of each event, without a timer for every file bar.
-    fn draw(
-        &self,
-        id: u64,
-    ) {
-        if let Some(bar) = self.total.as_ref().or_else(|| self.bars.get(&id)) {
-            bar.force_draw();
-        }
-    }
+
     fn update_total(&self) {
         if let Some(total) = &self.total {
             let remaining = self.total_size.saturating_sub(self.processed);
-            let elapsed = self.transfer_started.map(|start| start.elapsed().as_secs_f64()).unwrap_or(0.0);
-            // Only bytes sent during this run contribute to throughput. Skipped
-            // files and existing resume data reduce the remaining work, not time.
+            self.transfer_progress.set_length(self.transfer_progress.position() + remaining);
             let eta = if self.finished == self.num_files {
                 "0s".to_owned()
-            } else if remaining > 0 && elapsed >= 0.2 && self.transferred > 0 {
-                let seconds = remaining as f64 * elapsed / self.transferred as f64;
-                format!("{:#}", HumanDuration(Duration::from_secs_f64(seconds.min(315360000.0))))
+            } else if self.transfer_progress.per_sec() > 0.0 {
+                format!("{:#}", HumanDuration(self.transfer_progress.eta()))
             } else {
                 "—".to_owned()
             };
-            total.set_position(self.processed.min(self.total_size));
-            total.set_message(format!("{}/{} • ETA {}", self.finished, self.num_files, eta));
+            total.clone().with_position(self.processed.min(self.total_size)).with_message(format!("{}/{} • ETA {}", self.finished, self.num_files, eta)).tick();
         }
     }
     pub fn finish(
@@ -293,6 +269,7 @@ impl Progress {
         id: u64,
         label: &str,
     ) {
+        let _update = SynchronizedUpdate::new(&self.multi);
         if let Some(file) = self.files.get_mut(&id) {
             if file.terminal {
                 return;
@@ -305,7 +282,7 @@ impl Progress {
                     truncate(&file.name, 48),
                     "#".repeat(50),
                     HumanBytes(file.size),
-                    HumanDuration(file.started.map(|time| time.elapsed()).unwrap_or_default()),
+                    HumanDuration(self.bars.get(&id).map(ProgressBar::elapsed).unwrap_or_default()),
                     width = self.name_width,
                 )
             } else {
@@ -318,7 +295,7 @@ impl Progress {
                 self.multi.remove(&bar);
                 bar.finish_and_clear();
             }
-            self.println(&text);
+            self.println_inner(&text);
         }
         self.update_total();
         if self.finished == self.num_files {
@@ -327,15 +304,15 @@ impl Progress {
                     "  \x1b[1;32m{:<width$}\x1b[0m [\x1b[36m{}\x1b[0m] {} • in {:#} • {}/{}",
                     "Total",
                     "#".repeat(50),
-                    HumanBytes(self.transferred),
-                    HumanDuration(total.elapsed()),
+                    HumanBytes(self.transfer_progress.position()),
+                    HumanDuration(self.transfer_progress.elapsed()),
                     self.finished,
                     self.num_files,
                     width = self.name_width,
                 );
                 self.multi.remove(&total);
                 total.finish_and_clear();
-                self.println(&format!("  ------------------------\n{summary}"));
+                self.println_inner(&format!("  ------------------------\n{summary}"));
             }
         }
     }
@@ -356,6 +333,14 @@ impl Progress {
         &self,
         msg: &str,
     ) {
+        let _update = SynchronizedUpdate::new(&self.multi);
+        self.println_inner(msg);
+    }
+
+    fn println_inner(
+        &self,
+        msg: &str,
+    ) {
         if self.multi.is_hidden() {
             // Keep messages in redirected output, where indicatif hides bars.
             println!("{msg}");
@@ -373,4 +358,17 @@ fn truncate(
     } else {
         format!("{}…", value.chars().take(limit - 1).collect::<String>())
     }
+}
+
+fn file_style(transferring: bool) -> ProgressStyle {
+    let details = if transferring {
+        "{bytes_per_sec} • ETA {eta}"
+    } else {
+        "{msg}"
+    };
+    ProgressStyle::with_template(&format!(
+        "{{spinner:.green}} {{prefix:.bold.green}} [{{bar:50.cyan/blue}}] {{bytes}}/{{total_bytes}} • {details}"
+    ))
+    .unwrap()
+    .progress_chars("#>-")
 }

@@ -154,7 +154,7 @@ impl Send {
                                     progress.println(&format!("connect to {} relay failed: {}", relay_type.to_string(), error));
                                 }
                             }
-                            SenderInteractionMessage::FileStage(stage) => progress.set_stage(stage),
+                            SenderInteractionMessage::FileStarted(start) => progress.start_file(start.file_id, start.position),
                             SenderInteractionMessage::FileProgress(file_progress) => {
                                 progress.set_position(file_progress.file_id, file_progress.position);
                             }

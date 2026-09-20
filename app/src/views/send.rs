@@ -517,9 +517,9 @@ impl Render for SendView {
                                                 }
                                                 view.notification = NotificationType::Error(error);
                                             }
-                                            SenderInteractionMessage::FileStage(stage) => {
-                                                if let Some(pb) = view.progress_mut(stage.file_id) {
-                                                    pb.set_stage(stage.phase, stage.position);
+                                            SenderInteractionMessage::FileStarted(start) => {
+                                                if let Some(pb) = view.progress_mut(start.file_id) {
+                                                    pb.start(start.position);
                                                 }
                                             }
                                             SenderInteractionMessage::FileProgress(progress) => {
