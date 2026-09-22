@@ -48,6 +48,10 @@ struct SendCmd {
     #[clap(long, env = "FLASH_CAT_RELAY")]
     relay: Option<String>,
 
+    /// Send only over LAN without connecting to the public relay
+    #[clap(short, long, conflicts_with_all = ["relay", "lan_broadcast"])]
+    lan: bool,
+
     /// Disable LAN discovery while sending
     #[clap(long = "no-lan", action = ArgAction::SetFalse, default_value_t = true)]
     lan_broadcast: bool,
@@ -75,8 +79,8 @@ struct RecvCmd {
     #[clap(short = 'y', long)]
     assumeyes: bool,
 
-    /// Sender is in the same local area network
-    #[clap(short, long)]
+    /// Receive only over LAN; fail if discovery finds no sender (no public relay fallback)
+    #[clap(short, long, conflicts_with = "relay")]
     lan: bool,
 }
 
@@ -128,7 +132,14 @@ async fn send(send_cmd: SendCmd) -> Result<()> {
     #[cfg(windows)]
     let sigint = ctrl_c();
 
-    let send = Send::new(send_cmd.zip, send_cmd.relay, send_cmd.files, send_cmd.lan_broadcast).await?;
+    let send = Send::new(
+        send_cmd.zip,
+        send_cmd.relay,
+        send_cmd.files,
+        send_cmd.lan_broadcast,
+        send_cmd.lan,
+    )
+    .await?;
 
     let send_task = async { send.run().await };
 
@@ -320,4 +331,48 @@ fn main() -> ExitCode {
         Cmd::command().print_help().unwrap();
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn send_lan_flags_and_conflicts() {
+        for flag in ["--lan", "-l"] {
+            let cmd = Cmd::try_parse_from(["flash-cat", "send", flag, "file.txt"]).unwrap();
+            let Some(SubCmd::Send(send)) = cmd.sub_cmd else {
+                panic!("expected send")
+            };
+            assert!(send.lan);
+            assert!(send.lan_broadcast);
+            assert!(send.relay.is_none());
+        }
+        for args in [vec!["flash-cat", "send", "--lan", "--no-lan", "file.txt"], vec!["flash-cat", "send", "--lan", "--relay", "localhost:6880", "file.txt"]] {
+            assert_eq!(
+                Cmd::try_parse_from(args).unwrap_err().kind(),
+                clap::error::ErrorKind::ArgumentConflict
+            );
+        }
+    }
+
+    #[test]
+    fn recv_lan_flags_and_conflicts() {
+        for flag in ["--lan", "-l"] {
+            let cmd = Cmd::try_parse_from(["flash-cat", "recv", "xx-xxxx-xxxx", flag]).unwrap();
+            let Some(SubCmd::Recv(recv)) = cmd.sub_cmd else {
+                panic!("expected recv")
+            };
+            assert!(recv.lan);
+        }
+        let cmd = Cmd::try_parse_from(["flash-cat", "recv", "xx-xxxx-xxxx"]).unwrap();
+        let Some(SubCmd::Recv(recv)) = cmd.sub_cmd else {
+            panic!("expected recv")
+        };
+        assert!(!recv.lan);
+        assert_eq!(
+            Cmd::try_parse_from(["flash-cat", "recv", "xx-xxxx-xxxx", "--lan", "--relay", "localhost:6880"]).unwrap_err().kind(),
+            clap::error::ErrorKind::ArgumentConflict
+        );
+    }
 }

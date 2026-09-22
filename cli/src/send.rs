@@ -14,6 +14,7 @@ pub struct Send {
     share_code: String,
     sender: FlashCatSender,
     relay: Option<String>,
+    lan: bool,
 
     shutdown: Shutdown,
 }
@@ -24,6 +25,7 @@ impl Send {
         relay: Option<String>,
         files: Vec<String>,
         lan_broadcast: bool,
+        lan: bool,
     ) -> Result<Self> {
         let files = files
             .into_iter()
@@ -58,11 +60,12 @@ impl Send {
         )
         .await;
         scanning.finish_and_clear();
-        let sender = result?;
+        let sender = result?.with_lan_only(lan)?;
         Ok(Self {
             share_code,
             sender,
             relay,
+            lan,
             shutdown: Shutdown::new(),
         })
     }
@@ -100,7 +103,11 @@ impl Send {
             file_collector.max_file_name_length,
             file_collector.total_size,
         );
-        let connecting = progress.add_spinner("Connecting to relay...");
+        let connecting = progress.add_spinner(if self.lan {
+            "Starting LAN transfer..."
+        } else {
+            "Connecting to relay..."
+        });
 
         for file in file_collector.files.iter() {
             progress.register_file(&file.name, file.file_id, file.size);
@@ -121,7 +128,9 @@ impl Send {
                             }
                             SenderInteractionMessage::Message(msg) => progress.println(&msg),
                             SenderInteractionMessage::RelayConnected(relay_type) => {
-                                let expected_relay = if self.relay.is_some() {
+                                let expected_relay = if self.lan {
+                                    RelayType::Local
+                                } else if self.relay.is_some() {
                                     RelayType::Specify
                                 } else {
                                     RelayType::Public
@@ -132,7 +141,9 @@ impl Send {
                                     progress.println(&format!("Share code is: {}", self.share_code));
                                     progress.println("On the other computer run:");
                                     progress.println("");
-                                    if let Some(relay) = &self.relay {
+                                    if self.lan {
+                                        progress.println(&format!("flash-cat recv {} --lan", self.share_code));
+                                    } else if let Some(relay) = &self.relay {
                                         progress.println(&format!("flash-cat recv {} --relay {}", self.share_code, relay));
                                     } else {
                                         progress.println(&format!("flash-cat recv {}", self.share_code));

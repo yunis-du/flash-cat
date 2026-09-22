@@ -63,6 +63,9 @@ impl FlashCatReceiver {
         client_type: ClientType,
         lan: bool,
     ) -> Result<Self> {
+        if lan && specify_relay.is_some() {
+            bail!("LAN-only receiving cannot use a specified relay");
+        }
         let encryptor = Arc::new(Encryptor::new(share_code)?);
         let (confirm_tx, confirm_rx) = async_channel::bounded(10);
         Ok(Self {
@@ -93,6 +96,8 @@ impl FlashCatReceiver {
                 let relay_addr = relay_addr.unwrap();
                 let endpoint = get_endpoint(format!("http://{relay_addr}"))?;
                 self.connect_relay(RelayType::Local, endpoint, receiver_stream_tx.clone(), self.shutdown.clone()).await?;
+            } else if self.lan {
+                bail!("No sender found on the LAN; check the share code and LAN discovery connectivity");
             } else {
                 // public relay
                 let endpoint = get_endpoint(format!("https://{PUBLIC_RELAY}"))?;
@@ -136,7 +141,7 @@ impl FlashCatReceiver {
 
     async fn connect_relay(
         &self,
-        mut relay_type: RelayType,
+        relay_type: RelayType,
         endpoint: Endpoint,
         receiver_stream_tx: mpsc::Sender<ReceiverInteractionMessage>,
         shutdown: Shutdown,
@@ -172,13 +177,9 @@ impl FlashCatReceiver {
             }
         };
 
-        let (relay, sender_local_relay, client_latest_version) = if let Some(join_response_message) = resp.into_inner().join_response_message {
+        let (relay, client_latest_version) = if let Some(join_response_message) = resp.into_inner().join_response_message {
             match join_response_message {
-                join_response::JoinResponseMessage::Success(join_success) => (
-                    join_success.relay,
-                    join_success.sender_local_relay,
-                    join_success.client_latest_version,
-                ),
+                join_response::JoinResponseMessage::Success(join_success) => (join_success.relay, join_success.client_latest_version),
                 join_response::JoinResponseMessage::Failed(join_failed) => {
                     bail!(join_failed.error_msg);
                 }
@@ -210,51 +211,10 @@ impl FlashCatReceiver {
             }
         }
 
-        let endpoint = if relay_type == RelayType::Public && self.lan {
-            let sender_local_relay_endpoint = if sender_local_relay.is_some() {
-                let sender_local_relay = sender_local_relay.unwrap();
-                let sender_local_relay_endpoint = get_endpoint(format!(
-                    "http://{}:{}",
-                    sender_local_relay.relay_ip, sender_local_relay.relay_port
-                ))?;
-
-                match tokio::time::timeout(Duration::from_secs(1), async move {
-                    if RelayServiceClient::connect(sender_local_relay_endpoint.clone()).await.is_ok() {
-                        Some(sender_local_relay_endpoint)
-                    } else {
-                        None
-                    }
-                })
-                .await
-                {
-                    Ok(sender_local_relay_endpoint) => sender_local_relay_endpoint,
-                    Err(_) => None,
-                }
-            } else {
-                None
-            };
-
-            match sender_local_relay_endpoint {
-                Some(sender_local_relay_endpoint) => {
-                    relay_type = RelayType::Local;
-                    sender_local_relay_endpoint
-                }
-                None => {
-                    if relay.is_some() {
-                        let relay = relay.unwrap();
-                        get_endpoint(format!("http://{}:{}", relay.relay_ip, relay.relay_port))?
-                    } else {
-                        endpoint
-                    }
-                }
-            }
+        let endpoint = if let Some(relay) = relay {
+            get_endpoint(format!("http://{}:{}", relay.relay_ip, relay.relay_port))?
         } else {
-            if relay.is_some() {
-                let relay = relay.unwrap();
-                get_endpoint(format!("http://{}:{}", relay.relay_ip, relay.relay_port))?
-            } else {
-                endpoint
-            }
+            endpoint
         };
 
         let encryptor = self.encryptor.clone();

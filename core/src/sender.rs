@@ -128,6 +128,7 @@ pub struct FlashCatSender {
     lifecycle: SenderLifecycle,
     client_type: ClientType,
     lan_broadcast: bool,
+    lan_only: bool,
 }
 
 impl FlashCatSender {
@@ -176,6 +177,7 @@ impl FlashCatSender {
             lifecycle,
             client_type,
             lan_broadcast,
+            lan_only: false,
         })
     }
 
@@ -199,7 +201,20 @@ impl FlashCatSender {
             lifecycle: SenderLifecycle::new(),
             client_type,
             lan_broadcast,
+            lan_only: false,
         })
+    }
+
+    /// Restrict sending to the local relay and LAN discovery.
+    pub fn with_lan_only(
+        mut self,
+        lan_only: bool,
+    ) -> Result<Self> {
+        if lan_only && (self.specify_relay.is_some() || !self.lan_broadcast) {
+            bail!("LAN-only sending requires LAN discovery and cannot use a specified relay");
+        }
+        self.lan_only = lan_only;
+        Ok(self)
     }
 
     pub async fn start(self: Arc<Self>) -> Result<SenderStream> {
@@ -227,9 +242,10 @@ impl FlashCatSender {
             let endpoint = get_endpoint(format!("http://127.0.0.1:{local_relay_port}"))?;
             self.connect_relay(RelayType::Local, endpoint, sender_stream_tx.clone()).await?;
 
-            // connect public relay
-            let endpoint = get_endpoint(format!("https://{PUBLIC_RELAY}"))?;
-            self.connect_relay(RelayType::Public, endpoint, sender_stream_tx.clone()).await?;
+            if !self.lan_only {
+                let endpoint = get_endpoint(format!("https://{PUBLIC_RELAY}"))?;
+                self.connect_relay(RelayType::Public, endpoint, sender_stream_tx.clone()).await?;
+            }
 
             if self.lan_broadcast {
                 self.broadcast_relay_addr(local_relay_port, sender_stream_tx.clone(), self.lifecycle.local.clone()).await;
@@ -291,6 +307,7 @@ impl FlashCatSender {
         sender_stream_tx: mpsc::Sender<SenderInteractionMessage>,
         local_cancel: CancellationToken,
     ) {
+        let lan_only = self.lan_only;
         let scout_shutdown = Shutdown::new();
         let match_content = self.encryptor.encrypt_share_code_bytes().to_vec();
         tokio::spawn(async move {
@@ -300,13 +317,12 @@ impl FlashCatSender {
                 _ = local_cancel.cancelled() => None,
             };
             if let Some(Err(e)) = broadcast_result {
-                // LAN discovery is an optional optimization. TUN-based VPNs commonly
-                // reject broadcast traffic, but the public relay remains usable.
-                let _ = &sender_stream_tx
-                    .send(SenderInteractionMessage::Message(format!(
-                        "LAN discovery unavailable; continuing through relay: {e}"
-                    )))
-                    .await;
+                let message = if lan_only {
+                    SenderInteractionMessage::Error(format!("LAN discovery unavailable: {e}"))
+                } else {
+                    SenderInteractionMessage::Message(format!("LAN discovery unavailable; continuing through relay: {e}"))
+                };
+                let _ = sender_stream_tx.send(message).await;
             }
         });
     }

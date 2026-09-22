@@ -78,6 +78,17 @@ receive:
 flash-cat recv xx-xxxx-xxxx
 ```
 
+### LAN-only transfers
+
+Use `--lan` (or `-l`) to send without connecting to the public relay. Both devices must be on the same LAN with LAN discovery available. This option conflicts with `--relay` (including `FLASH_CAT_RELAY`) and `--no-lan`.
+
+Without `--relay`, receiving automatically tries LAN discovery first and falls back to the public relay when no sender is found. With `recv --lan`, discovery failure reports an error without connecting to the public relay; `--relay` cannot be combined with it.
+
+```bash
+flash-cat send --lan files-or-folder
+flash-cat recv xx-xxxx-xxxx --lan
+```
+
 ## Deploy your own relay server
 
 You can deploy your own relay server to handle file transfers within your local network or over the internet.
