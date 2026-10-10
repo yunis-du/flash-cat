@@ -37,11 +37,18 @@ impl Send {
             })
             .collect::<Vec<_>>();
         let share_code = gen_share_code();
-        let scanning = indicatif::ProgressBar::new_spinner();
+        if zip && console::Term::stderr().is_term() {
+            // Keep the initial hint visible while ZIP counts the source files,
+            // without a background spinner competing with compression output.
+            eprintln!("· Compressing files… (Ctrl+C to cancel)");
+        }
+        // Compression runs before the scan callback. Keep this spinner hidden
+        // until scanning starts so it cannot redraw over compression progress.
+        let scanning = indicatif::ProgressBar::hidden();
         scanning.set_style(indicatif::ProgressStyle::with_template("{spinner} {msg}")?);
-        scanning.enable_steady_tick(std::time::Duration::from_millis(100));
         scanning.set_message("Scanning files… (Ctrl+C to cancel)");
         let scan_progress = scanning.clone();
+        let mut scan_started = false;
         let result = FlashCatSender::new_with_scan_progress(
             share_code.clone(),
             relay.clone(),
@@ -50,12 +57,21 @@ impl Send {
             ClientType::Cli,
             lan_broadcast,
             move |progress| {
-                scan_progress.set_message(format!(
-                    "Scanning: {} files, {} folders, {} • Ctrl+C to cancel",
-                    progress.files,
-                    progress.folders,
-                    indicatif::HumanBytes(progress.bytes)
-                ));
+                if !scan_started {
+                    // The first report precedes collecting entries. Show the
+                    // initial message before switching to file counts.
+                    scan_progress.set_draw_target(indicatif::ProgressDrawTarget::stderr());
+                    scan_progress.tick();
+                    scan_progress.enable_steady_tick(std::time::Duration::from_millis(100));
+                    scan_started = true;
+                } else {
+                    scan_progress.set_message(format!(
+                        "Scanning: {} files, {} folders, {} • Ctrl+C to cancel",
+                        progress.files,
+                        progress.folders,
+                        indicatif::HumanBytes(progress.bytes)
+                    ));
+                }
             },
         )
         .await;
